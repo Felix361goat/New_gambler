@@ -2,7 +2,8 @@ betting:
   max_daily_bets: 10
   min_ev_threshold: 0.05           # 5% minimum EV (erhöht von 3% — Low-Coverage-Märkte haben mehr Edge)
   watchable_ev_threshold: 0.04
-  min_paper_bets_before_live: 500   # 200 insufficient to distinguish 53% from 50% model statistically
+  min_paper_bets_before_live: 500   # ~2-3 months at 7 bets/day
+  min_paper_days_before_live: 60    # at least 60 days regardless of bet count
   bankroll_paper: 1000.0
   kelly_fraction: 0.25
   max_stake_percent: 0.05
