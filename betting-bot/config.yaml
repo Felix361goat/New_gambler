@@ -6,6 +6,8 @@ betting:
   bankroll_paper: 1000.0
   kelly_fraction: 0.25
   max_stake_percent: 0.05
+  max_portfolio_leverage: 0.25
+  brier_score_warning_threshold: 0.20
   probability_safety_margin: 0.10
   min_odds: 1.50
   min_edge_over_implied: 0.05      # Unsere Prob muss >5% über bookie implied liegen

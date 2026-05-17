@@ -211,6 +211,21 @@ def select_daily_bets(
         else:
             pred["match_fixing_flagged"] = False
 
+    # Probability spread gate: wenn Modelle sich stark uneinig sind → höherer EV nötig
+    final_selected = []
+    min_ev = config.get("betting", {}).get("min_ev_threshold", 0.03)
+    for bet in selected:
+        model_preds = bet.get("_model_predictions", {})
+        if model_preds and len(model_preds) >= 2:
+            probs = [p.get("home_win_prob", 0.33) for p in model_preds.values() if isinstance(p, dict)]
+            if probs:
+                spread = max(probs) - min(probs)
+                if spread > 0.10 and bet.get("ev_score", 0) < min_ev * 1.5:
+                    logger.info(f"Spread gate: skipping {bet.get('home_team')} vs {bet.get('away_team')} — spread {spread:.2%}")
+                    continue
+        final_selected.append(bet)
+    selected = final_selected
+
     return selected
 
 

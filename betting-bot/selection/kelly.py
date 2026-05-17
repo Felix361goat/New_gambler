@@ -43,7 +43,13 @@ def kelly_stake(probability: float, decimal_odds: float, bankroll: float, config
     max_stake = bankroll * max_pct
     stake = bankroll * fractional_kelly
 
-    return round(min(stake, max_stake), 2)
+    stake = round(min(stake, max_stake), 2)
+
+    # Minimum stake: ignore dust amounts
+    if stake < 0.50:
+        return 0.0
+
+    return stake
 
 
 def kelly_stake_portfolio(bets: list, bankroll: float, config: dict) -> list:

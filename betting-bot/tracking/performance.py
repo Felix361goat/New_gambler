@@ -104,6 +104,28 @@ class PerformanceTracker:
             logger.error(f"check_clv_gate failed: {e}")
             return True, None  # Fail open — don't block on DB errors
 
+    def calculate_brier_score(self, days: int = 30) -> Optional[float]:
+        """Brier Score: 0=perfect, 0.25=random, >0.20=overconfident"""
+        try:
+            with self.db._get_conn() as conn:
+                rows = conn.execute("""
+                    SELECT b.our_probability, r.won
+                    FROM bets b
+                    JOIN results r ON b.id = r.bet_id
+                    WHERE b.created_at >= datetime('now', ?)
+                    AND r.won IS NOT NULL
+                """, (f"-{days} days",)).fetchall()
+
+            if not rows or len(rows) < 10:
+                return None
+
+            import numpy as np
+            scores = [(prob - (1.0 if won else 0.0)) ** 2 for prob, won in rows]
+            return round(float(np.mean(scores)), 4)
+        except Exception as e:
+            logger.error(f"Brier score calculation failed: {e}")
+            return None
+
     def get_full_summary(self) -> dict:
         summary = self.db.get_performance_summary(days=3650)
         settled = self.get_settled_bet_count()
