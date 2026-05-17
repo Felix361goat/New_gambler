@@ -1,0 +1,211 @@
+betting:
+  max_daily_bets: 10
+  min_ev_threshold: 0.05           # 5% minimum EV (erhöht von 3% — Low-Coverage-Märkte haben mehr Edge)
+  watchable_ev_threshold: 0.04
+  min_paper_bets_before_live: 500   # 200 insufficient to distinguish 53% from 50% model statistically
+  bankroll_paper: 1000.0
+  kelly_fraction: 0.25
+  max_stake_percent: 0.05
+  probability_safety_margin: 0.10
+  min_odds: 1.50
+  min_edge_over_implied: 0.05      # Unsere Prob muss >5% über bookie implied liegen
+  # Primary platform — all EV calculations use only this bookmaker's odds.
+  # Options: "bet365" | "betfair" | "unibet" | "pinnacle"
+  # bet365: best niche market coverage (AHL, Baltic basketball, ITF tennis)
+  # betfair: never limits winners, 5% commission already accounted for
+  primary_bookmaker: "bet365"
+  market_ev_thresholds:
+    tennis_ml: 0.03        # 3% for tennis moneyline
+    hockey_total: 0.06     # 6% for hockey over/under
+    basketball_ml: 0.04    # 4% for basketball moneyline
+    soccer_1x2: 0.05       # 5% for soccer match result
+    soccer_total: 0.04     # 4% for soccer totals
+    default: 0.05          # fallback 5%
+
+sports:
+  enabled:
+    - tennis_wta
+    - tennis_itf_women
+    - tennis_itf_men
+    - hockey_ahl
+    - hockey_echl
+    - hockey_european_minor
+    - basketball_baltic
+    - basketball_romanian
+    - basketball_european_lower
+    - soccer_england_tier4
+    - soccer_england_tier5
+    - soccer_scandinavia
+    - soccer_poland
+  disabled:                        # High-coverage markets — bookies have edge here
+    - premier_league
+    - bundesliga
+    - la_liga
+    - serie_a
+    - ligue_1
+    - nba
+    - nfl
+    - grand_slams
+    - atp_top50
+  matchfixing_excluded:            # Never bet — data unreliable or fixing risk too high
+    - table_tennis
+    - soccer_tier6_plus
+    - basketball_unknown_region
+
+  min_sample_sizes:
+    tennis_wta: 20
+    tennis_itf_women: 15
+    tennis_itf_men: 15
+    hockey_ahl: 15
+    hockey_echl: 10
+    basketball_baltic: 12
+    basketball_romanian: 10
+    soccer_england_tier4: 20
+    soccer_scandinavia: 15
+    soccer_poland: 15
+
+  confidence_tiers:
+    high_min_data_pct: 0.80        # ≥80% features available → High
+    medium_min_data_pct: 0.50      # 50-79% → Medium
+    # below 50% → Low
+
+  matchfixing_risk_flags:
+    flag_leagues:
+      - soccer_poland               # Flag but don't exclude — check per game
+      - soccer_england_tier5
+    exclude_leagues:
+      - table_tennis
+      - soccer_tier6_plus
+
+leagues:
+  priority:
+    - tennis_wta
+    - tennis_itf_men
+    - hockey_ahl
+    - basketball_baltic
+    - soccer_england_tier4
+    - soccer_scandinavia
+    - soccer_poland
+    - hockey_echl
+    - hockey_european_minor
+    - basketball_romanian
+    - basketball_european_lower
+    - soccer_england_tier5
+    - tennis_itf_women
+  watchable_preferred:
+    - tennis_wta
+    - hockey_ahl
+    - basketball_baltic
+  watchable_max_per_week: 3
+  watchable_min_per_week: 1
+  watchable_kickoff_window:
+    earliest_hour: 17
+    latest_hour: 23
+
+favorite_clubs:
+  clubs:
+    - "Arsenal"
+    - "Bristol Rovers"
+  ev_override_factor: 0.80
+
+data_sources:
+  football_api_key: ${FOOTBALL_API_KEY}
+  odds_api_key: ${ODDS_API_KEY}
+  weather_api_key: ${WEATHER_API_KEY}
+  # New low-coverage market APIs
+  tennis_rapidapi_key: ${TENNIS_RAPIDAPI_KEY}       # api-tennis.com via RapidAPI (~$10/mo, 500 req)
+  eliteprospects_api_key: ${ELITEPROSPECTS_API_KEY} # EliteProspects (hockey) — free tier available
+  betfair_api_key: ${BETFAIR_API_KEY}               # Betfair Exchange — better odds for tennis EV
+  betfair_session_token: ${BETFAIR_SESSION_TOKEN}   # Betfair session auth
+  pinnacle_api_key: ${PINNACLE_API_KEY}             # Pinnacle/OddsPortal sharp-bookie reference
+  # Tennis Abstract (Jeff Sackmann) — FREE, GitHub CSV downloads, no key needed
+  tennis_abstract_base_url: "https://raw.githubusercontent.com/JeffSackmann"
+  # SofaScore / Flashscore scraping — no official API, use scraping targets
+  sofascore_base_url: "https://www.sofascore.com"
+  flashscore_base_url: "https://www.flashscore.com"
+  request_delay_seconds: 2
+  max_retries: 3
+  timeout_seconds: 10
+
+telegram:
+  bot_token: ${TELEGRAM_BOT_TOKEN}
+  chat_id: ${TELEGRAM_CHAT_ID}
+  morning_briefing_hour: 8
+  morning_briefing_minute: 30
+  evening_summary_hour: 23
+  evening_summary_minute: 0
+  weekly_report_day: "sunday"
+  weekly_report_hour: 20
+
+google_sheets:
+  credentials_file: "google_credentials.json"
+  spreadsheet_id: ${GOOGLE_SHEET_ID}
+  tabs:
+    bets: "Bets"
+    analytics: "Analytics"
+    model_health: "Model Health"
+
+model:
+  retrain_day: "sunday"
+  retrain_hour: 3
+  min_samples_to_train: 50
+  form_weights:
+    last_5_games: 0.35
+    last_10_to_20_games: 0.25
+    full_current_season: 0.15
+    last_2_to_3_seasons: 0.15
+    head_to_head: 0.10
+  # Default ensemble weights (soccer fallback).
+  # Per-sport overrides live in models/ensemble.py SPORT_WEIGHTS dict.
+  # Tennis: Poisson=0.0 (disabled — set-based, not goal-based)
+  # Basketball: Poisson=0.0 (disabled — point totals violate Poisson assumptions)
+  ensemble_weights:
+    poisson: 0.30
+    xgboost: 0.45
+    elo: 0.25
+  min_models_agreeing: 2
+  agreement_prob_spread_max: 0.15   # Agreeing models must be within 0.15 prob — rejects ELO=0.52 vs XGB=0.71
+  # Sport-specific ELO K-factors.
+  # Tennis: higher K (ratings change faster — surface + form swings are large)
+  # Hockey: moderate K
+  # Basketball lower: higher K (small rosters → single player impact is huge)
+  # Soccer top: standard K=32
+  # Soccer lower: slightly higher (more volatility, weaker data)
+  elo_k_factors:
+    tennis: 48
+    hockey: 28
+    basketball: 40
+    soccer: 32
+    soccer_lower: 36
+  # ELO home advantage points per sport.
+  # Tennis: no home advantage (neutral venues for ITF/WTA)
+  # Hockey: moderate home ice advantage
+  # Basketball: moderate home court advantage
+  # Soccer: standard
+  elo_home_advantage:
+    tennis: 0
+    hockey: 80
+    basketball: 70
+    soccer: 100
+    soccer_lower: 90
+
+data_sources_extended:
+  # Tennis Abstract (Jeff Sackmann) — FREE, GitHub CSV
+  tennis_abstract_base: "https://raw.githubusercontent.com/JeffSackmann"
+  # SofaScore — scraping target, no API key
+  sofascore_base: "https://api.sofascore.com/api/v1"
+  # EliteProspects — Hockey, has free tier
+  eliteprospects_api_key: ${ELITEPROSPECTS_API_KEY}
+  eliteprospects_base: "https://api.eliteprospects.com/v1"
+  # Betfair Exchange — Sharp odds reference for tennis
+  betfair_api_key: ${BETFAIR_API_KEY}
+  betfair_base: "https://api.betfair.com/exchange/betting/rest/v1.0"
+  # OddsPortal — historical odds scraping
+  oddsportal_base: "https://www.oddsportal.com"
+
+logging:
+  log_all_flagged_bets: true
+  track_ev_vs_result: true
+  weekly_summary: true
+  log_path: "data/bets.log"
+  matchfixing_log_path: "data/matchfixing_flags.log"
