@@ -3,6 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import pytz
 from selection.ev_calculator import calculate_ev, calculate_ev_with_margin, breakeven_win_rate
+from selection.data_quality_tier import annotate_bets_with_tier
 
 logger = logging.getLogger(__name__)
 
@@ -14,6 +15,7 @@ def select_daily_bets(
     config: dict,
     week_watchable_count: int,
     ampel_params=None,
+    live_mode: bool = False,
 ) -> list:
     """
     LAYER 0: Match-fixing exclusion — never bet on excluded leagues
@@ -225,6 +227,21 @@ def select_daily_bets(
                     continue
         final_selected.append(bet)
     selected = final_selected
+
+    # LAYER 7: Data Quality Tier — annotiert jeden Bet mit Tier 1/2/3.
+    # Im Live Mode werden Tier-3-Bets in den paper-only Kanal verschoben
+    # und nicht zurückgegeben (sind weiterhin in DB als paper_only_bets).
+    active_bets, paper_only_bets = annotate_bets_with_tier(
+        selected, live_mode=live_mode
+    )
+    if paper_only_bets:
+        logger.info(
+            f"Data Quality Tier: {len(paper_only_bets)} Bet(s) zu Tier 3 (Paper Only) "
+            f"degradiert: {[b.get('league') for b in paper_only_bets]}"
+        )
+    # Tier-3-Bets werden immer zurückgegeben — im Paper Mode sind sie aktiv,
+    # im Live Mode sind sie als live_eligible=False markiert.
+    selected = active_bets + paper_only_bets
 
     return selected
 

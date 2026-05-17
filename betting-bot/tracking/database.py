@@ -37,7 +37,10 @@ CREATE TABLE IF NOT EXISTS bets (
     data_completeness REAL DEFAULT 0.0,
     matchfixing_warning TEXT,
     bookie_implied_prob REAL,
-    our_edge REAL
+    our_edge REAL,
+    data_quality_tier INTEGER DEFAULT 3,        -- 1=Premium, 2=Standard, 3=PaperOnly
+    data_quality_tier_label TEXT DEFAULT 'T3-PaperOnly',
+    live_eligible BOOLEAN DEFAULT 0            -- False für Tier 3
 )
 """
 

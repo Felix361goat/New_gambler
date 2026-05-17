@@ -80,6 +80,51 @@ sports:
       - table_tennis
       - soccer_tier6_plus
 
+  # ── Data Quality Tier System ───────────────────────────────────────────────
+  # Tier 1 = Premium Data  → Live + Paper
+  # Tier 2 = Standard Data → Live + Paper
+  # Tier 3 = Low Data      → NUR Paper Mode (nie live platziert)
+  #
+  # Mindestanforderungen pro Tier:
+  #   Tier 1: ≥5 Quellen | ≥3 Jahre Historik | ≥8 Bookies | ≥20 Spiele
+  #   Tier 2: ≥3 Quellen | ≥1.5 Jahre        | ≥4 Bookies | ≥12 Spiele
+  #   Tier 3: alles darunter → ausschließlich Paper-Tracking
+  #
+  # Zweck: data_quality_tier im DB-Feld erlaubt spätere ROI-Analyse
+  # pro Tier ("Welche Märkte sind wirklich profitabel?")
+  data_quality_tiers:
+    live_mode_min_tier: 2          # Tier 3 → Paper Only, Tier 1+2 → Live erlaubt
+    tier1:
+      min_sources: 5
+      min_history_years: 3.0
+      min_bookmakers: 8
+      min_sample_size: 20
+      leagues:                     # Explizite Tier-1-Zuordnung
+        - hockey_ahl
+        - tennis_wta
+        - tennis_atp
+        - basketball_baltic
+        - soccer_england_tier4
+        - soccer_scandinavia
+    tier2:
+      min_sources: 3
+      min_history_years: 1.5
+      min_bookmakers: 4
+      min_sample_size: 12
+      leagues:
+        - hockey_echl
+        - hockey_european_minor
+        - tennis_itf_women
+        - basketball_romanian
+        - basketball_european_lower
+        - soccer_poland
+    tier3_paper_only:              # Diese Ligen werden im Live Mode ignoriert
+      leagues:
+        - tennis_itf_men
+        - soccer_england_tier5
+        - basketball_unknown_region
+        - hockey_tier3_plus
+
 leagues:
   priority:
     - tennis_wta
