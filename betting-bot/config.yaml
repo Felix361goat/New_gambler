@@ -1,5 +1,5 @@
 betting:
-  max_daily_bets: 10
+  max_daily_bets: 25
   min_ev_threshold: 0.05           # 5% minimum EV (erhöht von 3% — Low-Coverage-Märkte haben mehr Edge)
   watchable_ev_threshold: 0.04
   min_paper_bets_before_live: 500   # ~2-3 months at 7 bets/day
@@ -194,7 +194,7 @@ google_sheets:
     model_health: "Model Health"
 
 paper_mode:
-  max_daily_bets: 5
+  max_daily_bets: 25
   min_ev_threshold: 0.07
   kelly_fraction: 0.25             # Quarter-Kelly auch im Paper-Mode
   max_stake_percent: 0.03
