@@ -80,6 +80,7 @@ class ModelRetrainer:
         return True
 
     def _retrain_xgboost(self, training_data) -> dict:
+        import copy
         import pandas as pd
 
         # Prefer rich match-feature log (real features) over flat bet columns
@@ -89,19 +90,33 @@ class ModelRetrainer:
             feature_df = pd.DataFrame()
 
         if not feature_df.empty and "outcome" in feature_df.columns and len(feature_df) >= self.min_samples:
-            # Use rich feature log: deserialise outcome → binary won flag
             settled = feature_df.dropna(subset=["outcome"])
             if len(settled) >= self.min_samples:
                 meta_cols = {"match_id", "match_date", "sport", "home_team", "away_team", "outcome"}
                 feature_cols = [c for c in settled.columns if c not in meta_cols]
                 X = settled[feature_cols].select_dtypes(include=["number"]).fillna(0)
-                # outcome: "won" / "lost" / "void" — map to binary
                 y = (settled["outcome"].str.lower() == "won").astype(int)
                 if len(X) >= self.min_samples:
-                    old_model = self.ensemble.xgboost
+                    # Chronological holdout: last 20% as test set
+                    split = int(len(X) * 0.8)
+                    X_train, X_test = X.iloc[:split], X.iloc[split:]
+                    y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+                    old_model = copy.deepcopy(self.ensemble.xgboost)
                     try:
-                        self.ensemble.xgboost.train(X, y)
-                        return {"success": True, "samples": len(X), "source": "match_feature_log"}
+                        self.ensemble.xgboost.train(X_train, y_train)
+                        new_score = self._score_model(self.ensemble.xgboost, X_test, y_test)
+                        old_score = self._score_model(old_model, X_test, y_test)
+                        if new_score >= old_score - 0.01:
+                            return {"success": True, "samples": len(X_train),
+                                    "holdout_new": round(new_score, 4),
+                                    "holdout_old": round(old_score, 4),
+                                    "source": "match_feature_log"}
+                        else:
+                            self.ensemble.xgboost = old_model
+                            logger.warning(f"New model ({new_score:.4f}) worse than old ({old_score:.4f}) — rolled back")
+                            return {"success": False, "reason": "holdout_gate_failed",
+                                    "holdout_new": round(new_score, 4), "holdout_old": round(old_score, 4)}
                     except Exception as e:
                         self.ensemble.xgboost = old_model
                         return {"success": False, "error": str(e)}
@@ -114,7 +129,6 @@ class ModelRetrainer:
         if len(settled) < self.min_samples:
             return {"success": False, "reason": f"only {len(settled)} settled bets"}
 
-        # Build simple feature set from bet data
         exclude_cols = {
             "id", "created_at", "match_date", "match_id", "home_team", "away_team",
             "league", "market", "bookmaker_name", "status", "notes", "watchable_reason",
@@ -127,26 +141,65 @@ class ModelRetrainer:
         if len(X) < self.min_samples:
             return {"success": False, "reason": "insufficient numeric features"}
 
-        # Keep backup of old model
-        old_model = self.ensemble.xgboost
+        split = int(len(X) * 0.8)
+        X_train, X_test = X.iloc[:split], X.iloc[split:]
+        y_train, y_test = y.iloc[:split], y.iloc[split:]
+
+        import copy
+        old_model = copy.deepcopy(self.ensemble.xgboost)
         try:
-            self.ensemble.xgboost.train(X, y)
-            return {"success": True, "samples": len(X), "source": "bets_fallback"}
+            self.ensemble.xgboost.train(X_train, y_train)
+            new_score = self._score_model(self.ensemble.xgboost, X_test, y_test)
+            old_score = self._score_model(old_model, X_test, y_test)
+            if new_score >= old_score - 0.01:
+                return {"success": True, "samples": len(X_train), "source": "bets_fallback",
+                        "holdout_new": round(new_score, 4), "holdout_old": round(old_score, 4)}
+            else:
+                self.ensemble.xgboost = old_model
+                logger.warning(f"New model ({new_score:.4f}) worse than old ({old_score:.4f}) — rolled back")
+                return {"success": False, "reason": "holdout_gate_failed",
+                        "holdout_new": round(new_score, 4), "holdout_old": round(old_score, 4)}
         except Exception as e:
-            # Rollback
             self.ensemble.xgboost = old_model
             return {"success": False, "error": str(e)}
 
+    def _score_model(self, model, X_test, y_test) -> float:
+        """Accuracy score on holdout set. Returns 0.5 if model or data unavailable."""
+        try:
+            if X_test.empty or len(y_test) == 0:
+                return 0.5
+            preds = model.predict(X_test.to_dict(orient="list"))
+            if isinstance(preds, dict):
+                prob_key = next((k for k in preds if "prob" in k), None)
+                if prob_key:
+                    import numpy as np
+                    pred_labels = (np.array(list(preds[prob_key])) > 0.5).astype(int)
+                    return float((pred_labels == y_test.values).mean())
+            return 0.5
+        except Exception:
+            return 0.5
+
     def _retrain_poisson(self, training_data) -> dict:
-        import pandas as pd
-        # Re-fit on available match data (use bet data as proxy)
         if not hasattr(self.ensemble, "poisson"):
             return {"success": False}
+        # Poisson needs home_goals + away_goals per match — use match_feature_log
         try:
-            self.ensemble.poisson.fit(training_data)
-            return {"success": True, "samples": len(training_data)}
-        except Exception as e:
-            return {"success": False, "error": str(e)}
+            match_df = self.db.get_match_features_for_retraining()
+        except Exception:
+            match_df = None
+
+        if match_df is not None and not match_df.empty:
+            goal_cols = {"home_goals", "away_goals", "home_team", "away_team"}
+            if goal_cols.issubset(set(match_df.columns)):
+                poisson_data = match_df[list(goal_cols)].dropna()
+                if len(poisson_data) >= self.min_samples:
+                    try:
+                        self.ensemble.poisson.fit(poisson_data)
+                        return {"success": True, "samples": len(poisson_data), "source": "match_feature_log"}
+                    except Exception as e:
+                        return {"success": False, "error": str(e)}
+
+        return {"success": False, "reason": "no goal data available for Poisson retraining"}
 
     def _update_elo(self, training_data) -> dict:
         if not hasattr(self.ensemble, "elo"):

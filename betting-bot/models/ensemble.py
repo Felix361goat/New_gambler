@@ -73,8 +73,9 @@ class EnsembleModel:
             logger.error("Fewer than 2 models available — cannot generate prediction")
             return None
 
-        if not self._models_agree([p[1] for p in predictions]):
-            logger.info(f"Models disagree for {home_team} vs {away_team} — skipping")
+        market = features.get("target_market", "1x2")
+        if not self._models_agree([p[1] for p in predictions], market=market):
+            logger.info(f"Models disagree for {home_team} vs {away_team} ({market}) — skipping")
             return None
 
         # Weighted average
@@ -132,17 +133,29 @@ class EnsembleModel:
 
         return result
 
-    def _models_agree(self, predictions: list) -> bool:
+    def _models_agree(self, predictions: list, market: str = "1x2") -> bool:
         if len(predictions) < 2:
             return False
 
         def outcome_and_prob(pred):
-            hw = pred.get("home_win_prob", 0.33)
-            d  = pred.get("draw_prob", 0.33)
-            aw = pred.get("away_win_prob", 0.34)
-            label = max(["home", "draw", "away"],
-                        key=lambda x: {"home": hw, "draw": d, "away": aw}[x])
-            prob = {"home": hw, "draw": d, "away": aw}[label]
+            # Use market-appropriate probability keys
+            if market in ("over_25", "over_35", "under_25", "under_35", "hockey_total", "soccer_total"):
+                over = pred.get("over_25_prob", pred.get("over_35_prob", 0.5))
+                under = pred.get("under_25_prob", pred.get("under_35_prob", 0.5))
+                label = "over" if over >= under else "under"
+                prob = max(over, under)
+            elif market == "btts":
+                btts = pred.get("btts_prob", 0.5)
+                label = "yes" if btts >= 0.5 else "no"
+                prob = btts if btts >= 0.5 else 1.0 - btts
+            else:
+                # Default: 1x2
+                hw = pred.get("home_win_prob", 0.33)
+                d  = pred.get("draw_prob", 0.33)
+                aw = pred.get("away_win_prob", 0.34)
+                label = max(["home", "draw", "away"],
+                            key=lambda x: {"home": hw, "draw": d, "away": aw}[x])
+                prob = {"home": hw, "draw": d, "away": aw}[label]
             return label, prob
 
         results = [outcome_and_prob(p) for p in predictions]
@@ -150,14 +163,10 @@ class EnsembleModel:
         most_common = max(set(labels), key=labels.count)
         agreeing = [r for r in results if r[0] == most_common]
 
-        # When only 2 models active, require unanimous; otherwise 2/3 majority.
         required = len(predictions) if len(predictions) < 3 else self.min_models_agreeing
         if len(agreeing) < required:
             return False
 
-        # Probability magnitude gate: agreeing models must be within 0.15 of each
-        # other.  XGBoost at 0.71 and ELO at 0.52 agree directionally but diverge
-        # too widely to trust the blended probability estimate.
         probs = [r[1] for r in agreeing]
         max_spread = self.agreement_prob_spread_max
         return (max(probs) - min(probs)) <= max_spread
