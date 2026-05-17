@@ -9,15 +9,24 @@ logger = logging.getLogger(__name__)
 AUSTRIAN_TZ = pytz.timezone("Europe/Vienna")
 
 
-def select_daily_bets(all_predictions: list, config: dict, week_watchable_count: int) -> list:
+def select_daily_bets(
+    all_predictions: list,
+    config: dict,
+    week_watchable_count: int,
+    ampel_params=None,
+) -> list:
     """
     LAYER 0: Match-fixing exclusion — never bet on excluded leagues
     LAYER 1: Hard filter — EV >= min_ev_threshold
-    LAYER 2: Sort by EV descending, take top 10
+    LAYER 2: Sort by EV descending, take top max_bets
     LAYER 3: Tiebreaker by league priority (only within 0.5% EV)
     LAYER 4: Watchable flag for preferred leagues
     LAYER 5: Favorite club override (80% threshold)
     LAYER 6: Match-fixing confidence penalty for flagged (not excluded) leagues
+
+    ampel_params: optional AmpelParameter object.  When provided its
+                  min_ev_threshold and max_daily_bets override config values.
+                  This is always a downward adjustment — never raises limits.
     """
     betting_cfg = config.get("betting", {})
     leagues_cfg = config.get("leagues", {})
@@ -27,6 +36,11 @@ def select_daily_bets(all_predictions: list, config: dict, week_watchable_count:
     min_ev       = betting_cfg.get("min_ev_threshold", 0.03)
     watchable_ev = betting_cfg.get("watchable_ev_threshold", 0.024)
     max_bets     = betting_cfg.get("max_daily_bets", 10)
+
+    # Ampel-Override: use stricter thresholds when Ampel is active
+    if ampel_params is not None:
+        min_ev   = max(min_ev,   ampel_params.min_ev_threshold)
+        max_bets = min(max_bets, ampel_params.max_daily_bets)
     min_odds     = betting_cfg.get("min_odds", 1.50)
     safety_margin = betting_cfg.get("probability_safety_margin", 0.10)
     ev_override  = betting_cfg.get("ev_override_factor", 0.80) if isinstance(clubs_cfg, dict) else 0.80

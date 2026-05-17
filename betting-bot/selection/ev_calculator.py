@@ -118,6 +118,37 @@ def breakeven_win_rate(decimal_odds: float) -> float:
     return round(1.0 / decimal_odds, 4)
 
 
+def calculate_ev_vig_free(our_probability: float, all_market_odds: list, our_outcome_index: int) -> float:
+    """EV gegen faire (vig-bereinigte) Quote.
+
+    Fallback auf calculate_ev() wenn nicht alle Seiten verfügbar sind.
+
+    Args:
+        our_probability:    Unsere geschätzte Gewinnwahrscheinlichkeit (0–1).
+        all_market_odds:    Dezimalquoten aller Outcomes dieses Marktes,
+                            z.B. [2.10, 3.50, 3.20] für Home / Draw / Away.
+        our_outcome_index:  Index des Outcomes das wir wetten (0=Home, …).
+
+    Returns:
+        EV als float (z.B. 0.073 = +7.3%).  Gibt nie > 1.0 zurück.
+    """
+    if not all_market_odds or len(all_market_odds) < 2 or our_outcome_index >= len(all_market_odds):
+        # Fallback: rohe EV wenn Gegenseiten-Quoten fehlen
+        if our_outcome_index < len(all_market_odds):
+            return calculate_ev(our_probability, all_market_odds[our_outcome_index])
+        return 0.0
+    try:
+        fair_probs = remove_vig(all_market_odds)
+        if not fair_probs or our_outcome_index >= len(fair_probs) or fair_probs[our_outcome_index] <= 0:
+            return calculate_ev(our_probability, all_market_odds[our_outcome_index])
+        fair_odds = 1.0 / fair_probs[our_outcome_index]
+        ev = round((our_probability * fair_odds) - 1.0, 6)
+        # Sanity cap: EV cannot exceed 1.0 (i.e. 100%)
+        return min(ev, 1.0)
+    except Exception:
+        return calculate_ev(our_probability, all_market_odds[our_outcome_index])
+
+
 def calculate_ev_betfair(our_probability: float, decimal_odds: float, commission: float = 0.05) -> float:
     """EV calculation accounting for Betfair's commission on winnings."""
     if our_probability <= 0 or our_probability >= 1:

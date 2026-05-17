@@ -129,13 +129,10 @@ def cmd_predict(config: dict):
     from selection.kelly import kelly_stake
     from selection.filter import select_daily_bets
     from tracking.performance import PerformanceTracker
+    from steering.ampel import calculate_ampel, AmpelMetrics
 
     db = DatabaseHandler()
     collector = DataCollector(config, db)
-
-    # Load historical data for models
-    logger.info("Loading training data...")
-    training_data = db.get_bets_for_retraining()
 
     # Initialize models
     poisson = PoissonModel()
@@ -169,6 +166,52 @@ def cmd_predict(config: dict):
                 f"CLV gate FAILED: rolling avg CLV = {avg_clv:+.4f} ({avg_clv*100:+.2f}%). "
                 "Model may be consistently overpaying — review model calibration."
             )
+
+    # ---- Ampel-System -------------------------------------------------------
+    drawdown_pct = tracker.calculate_max_drawdown_pct()
+    roi_last_20 = tracker.get_roi(days=20) if hasattr(tracker, "get_roi") else None
+
+    # Count consecutive bets with negative CLV to detect a losing streak
+    consecutive_neg_clv = 0
+    try:
+        with db._get_conn() as _conn:
+            _clv_rows = _conn.execute(
+                """SELECT r.clv_score FROM results r
+                   WHERE r.clv_score IS NOT NULL
+                   ORDER BY r.settled_at DESC LIMIT 50"""
+            ).fetchall()
+        for _row in _clv_rows:
+            if (_row[0] or 0) < 0:
+                consecutive_neg_clv += 1
+            else:
+                break
+    except Exception as _e:
+        logger.debug(f"Consecutive CLV streak calc failed: {_e}")
+
+    ampel_metrics = AmpelMetrics(
+        clv_avg_last_30=avg_clv,
+        clv_avg_last_50=avg_clv,  # best available proxy
+        drawdown_pct=drawdown_pct,
+        roi_last_20=roi_last_20,
+        consecutive_neg_clv_bets=consecutive_neg_clv,
+    )
+    ampel_params = calculate_ampel(ampel_metrics, config)
+
+    if ampel_params.auto_pause:
+        logger.warning(
+            "Ampel ROT + auto_pause: Drawdown > 25% — keine Bets generiert"
+        )
+        try:
+            from notifications.telegram_bot import TelegramBotHandler
+            _bot = TelegramBotHandler(config, db)
+            _bot.send_message_sync(
+                f"🔴 SYSTEM-PAUSE: Drawdown {drawdown_pct:.1f}% > 25% — "
+                "keine Bets heute. Prüfe Modell!"
+            )
+        except Exception as _tg_err:
+            logger.error(f"Ampel pause alert failed: {_tg_err}")
+        return []
+    # -------------------------------------------------------------------------
 
     bankroll = tracker.get_current_bankroll()
 
@@ -267,9 +310,9 @@ def cmd_predict(config: dict):
             logger.error(f"Prediction failed for {home} vs {away}: {e}")
             continue
 
-    # Apply selection filter
+    # Apply selection filter (Ampel parameters override config thresholds downward)
     week_watchable = _get_week_watchable_count(db)
-    selected = select_daily_bets(predictions, config, week_watchable)
+    selected = select_daily_bets(predictions, config, week_watchable, ampel_params=ampel_params)
 
     # Store in DB
     for bet in selected:

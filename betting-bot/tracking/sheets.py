@@ -195,6 +195,15 @@ class SheetsHandler:
             settled = health_data.get("settled_bets", 0)
             ready = "YES ✅" if settled >= 200 and roi > 3 else f"NO ({settled}/200 bets)"
 
+            # Ampel fields
+            ampel_status = health_data.get("ampel_status", "UNBEKANNT")
+            ampel_reason = health_data.get("ampel_reason", "")
+            drawdown_pct = health_data.get("drawdown_pct", 0.0)
+            clv_avg_30   = health_data.get("clv_avg_30", None)
+            ampel_icon   = {"GRUEN": "🟢", "GELB": "🟡", "ROT": "🔴"}.get(ampel_status, "⚪")
+
+            clv_str = f"{clv_avg_30:+.4f}" if clv_avg_30 is not None else "N/A (< 30 Bets)"
+
             data = [
                 ["Model Health Dashboard"],
                 [],
@@ -205,6 +214,11 @@ class SheetsHandler:
                 ["Ready for Live", ready],
                 ["Total Simulated P&L", f"{health_data.get('total_pnl', 0):+.2f}€"],
                 ["Days Running", health_data.get("days_running", 0)],
+                [],
+                ["Ampel Status", f"{ampel_icon} {ampel_status}"],
+                ["Ampel Reason", ampel_reason],
+                ["Max Drawdown %", f"{drawdown_pct:.2f}%"],
+                ["CLV Avg (last 30)", clv_str],
                 [],
                 ["Retraining Results"],
                 ["XGBoost", str(health_data.get("results", {}).get("xgboost", {}).get("success", "N/A"))],

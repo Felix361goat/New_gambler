@@ -61,6 +61,12 @@ class PerformanceTracker:
             logger.error(f"calculate_max_drawdown failed: {e}")
             return 0.0
 
+    def calculate_max_drawdown_pct(self, days: int = 90) -> float:
+        abs_drawdown = self.calculate_max_drawdown(days)
+        if self.starting_bankroll <= 0:
+            return 0.0
+        return round((abs_drawdown / self.starting_bankroll) * 100, 2)
+
     def check_clv_gate(self, db, min_bets: int = 30) -> tuple[bool, Optional[float]]:
         """
         Checks the rolling average CLV over the last `min_bets` settled bets.
@@ -114,5 +120,6 @@ class PerformanceTracker:
             "avg_ev": round(summary.get("avg_ev") or 0.0, 4),
             "avg_confidence": round(summary.get("avg_confidence") or 0.0, 1),
             "max_drawdown": self.calculate_max_drawdown(),
+            "max_drawdown_pct": self.calculate_max_drawdown_pct(),
             "ready_for_live": self.is_ready_for_live(),
         }
