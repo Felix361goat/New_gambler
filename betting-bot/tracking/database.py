@@ -113,6 +113,20 @@ CREATE TABLE IF NOT EXISTS user_interactions (
 )
 """
 
+CREATE_MATCH_FEATURE_LOG = """
+CREATE TABLE IF NOT EXISTS match_feature_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    match_id TEXT NOT NULL,
+    match_date DATE,
+    sport TEXT,
+    home_team TEXT,
+    away_team TEXT,
+    features_json TEXT,
+    outcome TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+"""
+
 
 class DatabaseHandler:
     def __init__(self, db_path: Path = DB_PATH):
@@ -134,6 +148,7 @@ class DatabaseHandler:
                 conn.execute(CREATE_REFEREE_STATS)
                 conn.execute(CREATE_ODDS_SNAPSHOTS)
                 conn.execute(CREATE_USER_INTERACTIONS)
+                conn.execute(CREATE_MATCH_FEATURE_LOG)
                 conn.commit()
         except Exception as e:
             logger.error(f"DB init failed: {e}")
@@ -275,6 +290,61 @@ class DatabaseHandler:
                 return df
         except Exception as e:
             logger.error(f"get_bets_for_retraining failed: {e}")
+            return pd.DataFrame()
+
+    def insert_match_feature_log(self, data: dict) -> Optional[int]:
+        """Insert a feature snapshot for a single match into match_feature_log."""
+        import json
+        try:
+            features = data.get("features")
+            features_json = json.dumps(features) if features is not None else None
+            record = {
+                "match_id":     data.get("match_id", ""),
+                "match_date":   str(data.get("match_date", "")),
+                "sport":        data.get("sport", ""),
+                "home_team":    data.get("home_team", ""),
+                "away_team":    data.get("away_team", ""),
+                "features_json": features_json,
+                "outcome":      data.get("outcome"),
+            }
+            cols = ", ".join(record.keys())
+            placeholders = ", ".join(["?"] * len(record))
+            sql = f"INSERT INTO match_feature_log ({cols}) VALUES ({placeholders})"
+            with self._get_conn() as conn:
+                cursor = conn.execute(sql, list(record.values()))
+                conn.commit()
+                return cursor.lastrowid
+        except Exception as e:
+            logger.error(f"insert_match_feature_log failed: {e}")
+            return None
+
+    def get_match_features_for_retraining(self) -> "pd.DataFrame":
+        """Return all logged match features that have an outcome set."""
+        import json
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    """SELECT match_id, match_date, sport, home_team, away_team,
+                              features_json, outcome
+                       FROM match_feature_log
+                       WHERE outcome IS NOT NULL
+                       ORDER BY match_date"""
+                ).fetchall()
+            records = []
+            for row in rows:
+                row_dict = dict(row)
+                raw_json = row_dict.pop("features_json", None)
+                if raw_json:
+                    try:
+                        feat = json.loads(raw_json)
+                        if isinstance(feat, dict):
+                            row_dict.update(feat)
+                    except Exception:
+                        pass
+                records.append(row_dict)
+            return pd.DataFrame(records)
+        except Exception as e:
+            logger.error(f"get_match_features_for_retraining failed: {e}")
             return pd.DataFrame()
 
     def update_daily_performance(self, target_date: date) -> bool:

@@ -462,8 +462,21 @@ def cmd_retrain(config: dict):
         pass
 
     retrainer = ModelRetrainer(db, ensemble, sheets, config)
-    success = retrainer.retrain_weekly()
-    print("✅ Retraining complete" if success else "⚠️  Retraining skipped (insufficient data)")
+    result = retrainer.retrain_weekly()
+    # retrain_weekly() returns True (success), False (insufficient data), or
+    # a dict with {"success": False, "reason": ...} for CLV gate / other failures.
+    if result is True:
+        print("✅ Retraining complete")
+    elif isinstance(result, dict):
+        reason = result.get("reason", "unknown")
+        if reason == "clv_gate_failed":
+            avg_clv = result.get("avg_clv")
+            clv_str = f"{avg_clv:.4f}" if avg_clv is not None else "N/A"
+            print(f"⚠️  Retraining skipped — CLV gate failed (avg_clv={clv_str})")
+        else:
+            print(f"⚠️  Retraining skipped ({reason})")
+    else:
+        print("⚠️  Retraining skipped (insufficient data)")
 
 
 def cmd_weekly_report(config: dict):

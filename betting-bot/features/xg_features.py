@@ -53,11 +53,22 @@ def calculate_xg_features(team_id: str, matches_with_xg: pd.DataFrame) -> dict:
     else:
         trend = 0.0
 
+    # Overperformance flag: significant deviation from xG signals regression risk.
+    # Threshold: 0.40 goals/game above/below xG is meaningful (config-overridable).
+    xg_overperf_threshold = 0.40
+    if xg_overperf < -xg_overperf_threshold:
+        overperf_flag = 1    # scoring well below xG → due for improvement
+    elif xg_overperf > xg_overperf_threshold:
+        overperf_flag = -1   # scoring well above xG → regression risk
+    else:
+        overperf_flag = 0    # no meaningful deviation
+
     return {
         "xg_scored_rolling10": round(xg_sc_r10, 3),
         "xg_conceded_rolling10": round(xg_co_r10, 3),
         "xg_difference": round(xg_diff, 3),
         "xg_overperformance": round(xg_overperf, 3),
+        "xg_overperformance_flag": overperf_flag,
         "xg_trend": round(trend, 3),
         "npxg_scored": round(roll10(npxg_scored_list), 3),
     }
@@ -69,6 +80,7 @@ def _empty_xg() -> dict:
         "xg_conceded_rolling10": 0.0,
         "xg_difference": 0.0,
         "xg_overperformance": 0.0,
+        "xg_overperformance_flag": 0,
         "xg_trend": 0.0,
         "npxg_scored": 0.0,
     }

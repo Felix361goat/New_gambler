@@ -145,6 +145,14 @@ google_sheets:
     analytics: "Analytics"
     model_health: "Model Health"
 
+paper_mode:
+  max_daily_bets: 5
+  min_ev_threshold: 0.07
+  kelly_fraction: 0.25             # Quarter-Kelly auch im Paper-Mode
+  max_stake_percent: 0.03
+  agreement_prob_spread_max: 0.12
+  active_until_bet_count: 500
+
 model:
   retrain_day: "sunday"
   retrain_hour: 3
@@ -164,7 +172,8 @@ model:
     xgboost: 0.45
     elo: 0.25
   min_models_agreeing: 2
-  agreement_prob_spread_max: 0.15   # Agreeing models must be within 0.15 prob — rejects ELO=0.52 vs XGB=0.71
+  agreement_prob_spread_max: 0.12         # Agreeing models must be within 0.12 prob — rejects ELO=0.52 vs XGB=0.71
+  agreement_prob_spread_max_tennis: 0.18  # Tennis braucht mehr Toleranz (höhere Volatilität)
   # Sport-specific ELO K-factors.
   # Tennis: higher K (ratings change faster — surface + form swings are large)
   # Hockey: moderate K

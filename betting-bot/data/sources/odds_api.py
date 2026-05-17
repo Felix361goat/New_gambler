@@ -8,8 +8,9 @@ import pandas as pd
 from .base_source import BaseSource
 
 
-# Supported sports slugs on The Odds API
-SUPPORTED_SPORTS = [
+# Supported sports slugs on The Odds API.
+# Niche markets are grouped separately so fetch errors don't block top-tier data.
+SUPPORTED_SPORTS_CORE = [
     "soccer_epl",
     "soccer_germany_bundesliga",
     "soccer_spain_la_liga",
@@ -17,6 +18,24 @@ SUPPORTED_SPORTS = [
     "soccer_france_ligue_one",
     "basketball_nba",
 ]
+
+SUPPORTED_SPORTS_NICHE = [
+    "tennis_wta",
+    "tennis_atp",
+    "icehockey_nhl",
+    "icehockey_ahl",
+    "basketball_nba",             # already in core, deduped at runtime
+    "basketball_euroleague",
+    "soccer_australia_aleague",
+    "soccer_scandinavia",
+    "soccer_austria_bundesliga",
+    "soccer_poland_ekstraklasa",
+    "soccer_england_league1",
+    "soccer_england_league2",
+]
+
+# Combined list (used by fetch() — niche sports come after core)
+SUPPORTED_SPORTS = list(dict.fromkeys(SUPPORTED_SPORTS_CORE + SUPPORTED_SPORTS_NICHE))
 
 DEFAULT_REGIONS = "eu,uk,us"
 DEFAULT_MARKETS = "h2h,totals"
@@ -31,9 +50,14 @@ class OddsAPISource(BaseSource):
 
     BASE_URL = "https://api.the-odds-api.com/v4"
 
-    def __init__(self):
+    def __init__(self, config=None):
         super().__init__()
-        api_key = os.environ.get("ODDS_API_KEY", "")
+        self.config = config or {}
+        # API key: prefer config dict, fall back to environment variable
+        api_key = (
+            self.config.get("data_sources", {}).get("odds_api_key", "")
+            or os.environ.get("ODDS_API_KEY", "")
+        )
         if not api_key:
             self.logger.warning("ODDS_API_KEY not set – requests may fail.")
         self.api_key = api_key
@@ -173,7 +197,12 @@ class OddsAPISource(BaseSource):
     # ------------------------------------------------------------------
 
     def fetch(self) -> Dict:
-        """Fetch odds for all supported sports."""
+        """Fetch odds for all supported sports.
+
+        Core sports are fetched first.  Niche sports are fetched with
+        individual try/except blocks so a single failing sport never
+        aborts the entire data collection run.
+        """
         all_events: List[Dict] = []
         errors: List[str] = []
 
@@ -186,6 +215,7 @@ class OddsAPISource(BaseSource):
                 msg = f"{sport}: {exc}"
                 errors.append(msg)
                 self.logger.warning(f"Failed to fetch odds for {msg}")
+                # Non-fatal: continue with remaining sports
 
         return {"events": all_events, "errors": errors}
 

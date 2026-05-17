@@ -110,6 +110,15 @@ class EnsembleModel:
         sentiment_mod = features.get("news_sentiment_modifier", 0.0)
         confidence_score = int(max(0, min(100, confidence_score + sentiment_mod * 100)))
 
+        # xG overperformance flag modifier.
+        # home_flag=+1 (home team under-performing xG → due) raises home confidence.
+        # away_flag=+1 (away under-performing) lowers our confidence (they may improve).
+        # Each flag unit = ±2 confidence points (xg_modifier ∈ {-0.04, -0.02, 0, +0.02, +0.04}).
+        home_flag = features.get("home_xg_overperformance_flag", 0)
+        away_flag = features.get("away_xg_overperformance_flag", 0)
+        xg_modifier = (home_flag - away_flag) * 0.02
+        confidence_score = int(max(0, min(100, confidence_score + xg_modifier * 100)))
+
         result["confidence_score"] = confidence_score
         result["models_used"] = [name for name, _, _ in predictions]
         result["model_agreement"] = round(agreement, 3)

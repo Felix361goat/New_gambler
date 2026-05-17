@@ -167,6 +167,24 @@ class FeatureBuilder:
             f"available={available_features}, imputed={imputed_features}"
         )
 
+        # Log features to DB for future retraining (only when DB is available)
+        if self.db is not None:
+            try:
+                # Exclude internal metadata keys from the persisted snapshot
+                loggable = {k: v for k, v in features.items()
+                            if not k.startswith("_")}
+                self.db.insert_match_feature_log({
+                    "match_id":   match_id,
+                    "match_date": match.get("date", ""),
+                    "sport":      match.get("sport", "soccer"),
+                    "home_team":  home,
+                    "away_team":  away,
+                    "features":   loggable,
+                    "outcome":    None,  # filled in later by results_source
+                })
+            except Exception as _log_err:
+                logger.debug(f"Feature log insert failed (non-critical): {_log_err}")
+
         return features
 
     # ------------------------------------------------------------------

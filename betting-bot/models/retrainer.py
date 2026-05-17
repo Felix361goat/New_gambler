@@ -18,6 +18,19 @@ class ModelRetrainer:
         logger.info("Starting weekly model retraining...")
         start_time = datetime.now()
 
+        # CLV-Gate: skip retraining when model is consistently overpaying
+        try:
+            from tracking.performance import PerformanceTracker
+            tracker = PerformanceTracker(self.db, self.config)
+            clv_ok, avg_clv = tracker.check_clv_gate(self.db, min_bets=30)
+            if not clv_ok:
+                logger.warning(
+                    f"CLV gate FAILED (avg_clv={avg_clv:.4f}) — retraining skipped"
+                )
+                return {"success": False, "reason": "clv_gate_failed", "avg_clv": avg_clv}
+        except Exception as _clv_err:
+            logger.warning(f"CLV gate check failed (non-critical, continuing): {_clv_err}")
+
         training_data = self.db.get_bets_for_retraining()
 
         if training_data.empty or len(training_data) < self.min_samples:
@@ -68,8 +81,32 @@ class ModelRetrainer:
 
     def _retrain_xgboost(self, training_data) -> dict:
         import pandas as pd
-        from features.builder import FeatureBuilder
 
+        # Prefer rich match-feature log (real features) over flat bet columns
+        try:
+            feature_df = self.db.get_match_features_for_retraining()
+        except Exception:
+            feature_df = pd.DataFrame()
+
+        if not feature_df.empty and "outcome" in feature_df.columns and len(feature_df) >= self.min_samples:
+            # Use rich feature log: deserialise outcome → binary won flag
+            settled = feature_df.dropna(subset=["outcome"])
+            if len(settled) >= self.min_samples:
+                meta_cols = {"match_id", "match_date", "sport", "home_team", "away_team", "outcome"}
+                feature_cols = [c for c in settled.columns if c not in meta_cols]
+                X = settled[feature_cols].select_dtypes(include=["number"]).fillna(0)
+                # outcome: "won" / "lost" / "void" — map to binary
+                y = (settled["outcome"].str.lower() == "won").astype(int)
+                if len(X) >= self.min_samples:
+                    old_model = self.ensemble.xgboost
+                    try:
+                        self.ensemble.xgboost.train(X, y)
+                        return {"success": True, "samples": len(X), "source": "match_feature_log"}
+                    except Exception as e:
+                        self.ensemble.xgboost = old_model
+                        return {"success": False, "error": str(e)}
+
+        # Fallback: use bet data columns when feature log is empty or insufficient
         if "won" not in training_data.columns:
             return {"success": False, "reason": "no outcome data"}
 
@@ -78,11 +115,12 @@ class ModelRetrainer:
             return {"success": False, "reason": f"only {len(settled)} settled bets"}
 
         # Build simple feature set from bet data
-        feature_cols = [c for c in settled.columns if c not in
-                       ["id", "created_at", "match_date", "match_id", "home_team", "away_team",
-                        "league", "market", "bookmaker_name", "status", "notes", "watchable_reason",
-                        "won", "pnl_simulated", "clv_score"]]
-
+        exclude_cols = {
+            "id", "created_at", "match_date", "match_id", "home_team", "away_team",
+            "league", "market", "bookmaker_name", "status", "notes", "watchable_reason",
+            "won", "pnl_simulated", "clv_score",
+        }
+        feature_cols = [c for c in settled.columns if c not in exclude_cols]
         X = settled[feature_cols].select_dtypes(include=["number"]).fillna(0)
         y = (settled["won"] == 1).astype(int)
 
@@ -93,7 +131,7 @@ class ModelRetrainer:
         old_model = self.ensemble.xgboost
         try:
             self.ensemble.xgboost.train(X, y)
-            return {"success": True, "samples": len(X)}
+            return {"success": True, "samples": len(X), "source": "bets_fallback"}
         except Exception as e:
             # Rollback
             self.ensemble.xgboost = old_model
