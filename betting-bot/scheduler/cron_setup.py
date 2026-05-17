@@ -21,11 +21,22 @@ CRON_JOBS = [
 
 
 def install_cron_jobs(main_script: Path):
-    """Install all cron jobs. Idempotent — won't duplicate existing jobs."""
+    """Install all cron jobs. On Windows: prints manual instructions instead."""
+    import platform
     python = sys.executable
     main_path = str(main_script.resolve())
 
-    # Read current crontab
+    if platform.system() == "Windows":
+        print("✅ Scheduler-Hinweis für Windows:")
+        print("   Cron gibt es auf Windows nicht. Starte den Bot täglich manuell:")
+        print()
+        for _, arg, comment in CRON_JOBS:
+            print(f"   python \"{main_path}\" {arg}   # {comment}")
+        print()
+        print("   Oder nutze den Windows Task-Scheduler (optional).")
+        return 0
+
+    # Linux/macOS: use crontab
     try:
         result = subprocess.run(["crontab", "-l"], capture_output=True, text=True)
         current = result.stdout if result.returncode == 0 else ""
@@ -37,8 +48,7 @@ def install_cron_jobs(main_script: Path):
 
     for schedule, arg, comment in CRON_JOBS:
         job_line = f"{schedule} {python} {main_path} {arg}  # betting-bot: {comment}"
-        # Check if this arg is already scheduled
-        if any(f"main.py {arg}" in line or f"main.py {arg}" in line for line in lines):
+        if any(f"main.py {arg}" in line for line in lines):
             logger.info(f"Cron job already exists: {arg}")
             continue
         lines.append(job_line)
