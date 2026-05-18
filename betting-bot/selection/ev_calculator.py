@@ -33,7 +33,7 @@ def get_platform_odds(match_id: str, market: str, odds_api_data: list, primary_b
         if entry.get("market") != market:
             continue
         entry_bookmaker = (entry.get("bookmaker") or "").lower()
-        if bookmaker_lower in entry_bookmaker or entry_bookmaker in bookmaker_lower:
+        if entry_bookmaker == bookmaker_lower or entry_bookmaker.startswith(bookmaker_lower + "_"):
             odds = entry.get("odds", 0.0)
             if odds and odds > 1.0:
                 return float(odds), entry.get("bookmaker", primary_bookmaker)

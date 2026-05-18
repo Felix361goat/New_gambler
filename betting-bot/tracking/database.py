@@ -42,7 +42,8 @@ CREATE TABLE IF NOT EXISTS bets (
     data_quality_tier_label TEXT DEFAULT 'T3-PaperOnly',
     live_eligible BOOLEAN DEFAULT 0,           -- False für Tier 3
     predict_window TEXT DEFAULT NULL,          -- 'morning'|'midday'|'afternoon'
-    brief_sent_at TIMESTAMP DEFAULT NULL       -- NULL = not yet briefed
+    brief_sent_at TIMESTAMP DEFAULT NULL,      -- NULL = not yet briefed
+    match_fixing_flagged BOOLEAN DEFAULT 0     -- True = confidence penalty applied
 )
 """
 
@@ -179,6 +180,7 @@ class DatabaseHandler:
             # Multi-window scheduling columns (added 2025)
             ("predict_window", "TEXT DEFAULT NULL"),        # 'morning'|'midday'|'afternoon'
             ("brief_sent_at", "TIMESTAMP DEFAULT NULL"),    # NULL = not yet briefed
+            ("match_fixing_flagged", "BOOLEAN DEFAULT 0"),  # True = confidence penalty applied
         ]
         try:
             with self._get_conn() as conn:

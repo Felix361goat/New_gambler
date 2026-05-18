@@ -680,14 +680,18 @@ def cmd_predict(config: dict):
                 if platform_odds < min_odds:
                     continue
 
-                # Apply safety margin: 10% haircut before EV + Kelly
-                our_prob_adj = our_prob * (1.0 - safety_margin)
+                # True EV (stored in DB and used for threshold filtering in filter.py).
+                # filter.py applies the safety margin separately via calculate_ev_with_margin,
+                # so we only store/compare the true EV here.
                 if primary_bookmaker.lower() == "betfair":
-                    ev = calculate_ev_betfair(our_prob_adj, platform_odds)
+                    ev = calculate_ev_betfair(our_prob, platform_odds)
                 else:
-                    ev = calculate_ev(our_prob_adj, platform_odds)
+                    ev = calculate_ev(our_prob, platform_odds)
                 if ev <= 0:
                     continue
+
+                # Conservative probability used ONLY for stake sizing (not EV display).
+                our_prob_adj = our_prob * (1.0 - safety_margin)
 
                 # Pass Ampel-adjusted kelly_fraction so GELB/ROT stake reductions
                 # actually take effect — the base config always has 0.25.
@@ -732,9 +736,13 @@ def cmd_predict(config: dict):
     week_watchable = _get_week_watchable_count(db)
     selected = select_daily_bets(predictions, window_config, week_watchable, ampel_params=ampel_params)
 
-    # Store in DB — exclude non-DB fields, but keep predict_window for tracking
+    # Strip keys that are not in the bets DDL before inserting.
+    # kickoff_time: used only for watchable-window check in filter.py
+    # _model_predictions: internal ensemble state, not stored
+    # skipped_reason: only attached to rejected predictions, not selected ones
+    _NON_DDL_KEYS = {"kickoff_time", "_model_predictions", "skipped_reason"}
     for bet in selected:
-        bet_copy = {k: v for k, v in bet.items() if k not in ("kickoff_time",)}
+        bet_copy = {k: v for k, v in bet.items() if k not in _NON_DDL_KEYS}
         db.insert_bet(bet_copy)
 
     logger.info(
