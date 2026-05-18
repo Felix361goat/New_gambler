@@ -7,12 +7,12 @@ import logging
 logger = logging.getLogger(__name__)
 
 CRON_JOBS = [
-    # ── Data collection: runs before each predict window ──────────────────────
-    # 06:00  morning baseline
-    # 11:50  before midday predict (12:00) — 10 min margin
-    # 15:50  before afternoon predict (16:00) — 10 min margin
+    # ── Data collection: 2× per day to stay within free-tier quota ───────────
+    # Budget: 8 sport_keys × 2 collects/day × 31 days = 496 req/month (<500).
+    # 06:00  morning baseline — feeds morning + midday predict windows
+    # 15:50  pre-afternoon refresh — fresh odds for evening matches
+    # The 11:50 midday collect was removed to preserve the free-tier budget.
     ("0 6 * * *",    "--collect",       "Collect data — morning baseline"),
-    ("50 11 * * *",  "--collect",       "Collect data — pre-midday"),
     ("50 15 * * *",  "--collect",       "Collect data — pre-afternoon"),
 
     # ── Predict: 3 windows, window auto-detected from clock ───────────────────

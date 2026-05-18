@@ -535,6 +535,19 @@ def cmd_predict(config: dict):
     # This maps: h2h→1x2_*/draw, totals→over_N/under_N, event_id→match_id
     odds_data = _normalize_odds_for_predict(odds_df)
 
+    # Staleness guard: determine age of odds data from fetched_at timestamps.
+    # If data is older than 4h AND kickoff is within 2h, the lines have moved
+    # too much for EV to be reliable — skip those matches.
+    _now_utc = datetime.now(timezone.utc)
+    _data_age_hours: float = 0.0
+    if odds_df is not None and not odds_df.empty and "fetched_at" in odds_df.columns:
+        try:
+            latest_fetch = pd.to_datetime(odds_df["fetched_at"], utc=True, errors="coerce").max()
+            if pd.notna(latest_fetch):
+                _data_age_hours = (_now_utc - latest_fetch).total_seconds() / 3600
+        except Exception:
+            pass
+
     for _, match in (upcoming.iterrows() if hasattr(upcoming, "iterrows") else []):
         match_dict = dict(match)
         match_id = match_dict.get("match_id", "")
@@ -543,6 +556,22 @@ def cmd_predict(config: dict):
 
         if not home or not away:
             continue
+
+        # Staleness guard: skip matches where odds are >4h old AND kickoff <2h away.
+        # At that point line movement is invisible to our model and EV is unreliable.
+        if _data_age_hours > 4.0:
+            kickoff_raw = match_dict.get("kickoff_time")
+            if kickoff_raw is not None:
+                try:
+                    _ko = pd.to_datetime(kickoff_raw, utc=True, errors="coerce")
+                    if pd.notna(_ko) and (_ko - _now_utc).total_seconds() / 3600 < 2.0:
+                        logger.info(
+                            f"Staleness skip: {home} vs {away} — "
+                            f"data {_data_age_hours:.1f}h old, kickoff <2h"
+                        )
+                        continue
+                except Exception:
+                    pass
 
         try:
             features = feature_builder.build_match_features(

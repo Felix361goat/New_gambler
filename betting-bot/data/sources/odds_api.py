@@ -8,34 +8,21 @@ import pandas as pd
 from .base_source import BaseSource
 
 
-# Supported sports slugs on The Odds API.
-# Niche markets are grouped separately so fetch errors don't block top-tier data.
-SUPPORTED_SPORTS_CORE = [
-    "soccer_epl",
-    "soccer_germany_bundesliga",
-    "soccer_spain_la_liga",
-    "soccer_italy_serie_a",
-    "soccer_france_ligue_one",
-    "basketball_nba",
-]
-
-SUPPORTED_SPORTS_NICHE = [
+# 8 sport keys chosen to stay within the free-tier budget of 500 req/month.
+# Budget: 8 keys × 2 collects/day × 31 days = 496 req/month.
+# Keys are niche/mid-tier markets where line inefficiency is highest.
+# Top-tier leagues (EPL, La Liga, Bundesliga) are excluded — bookmakers
+# have the edge there and the config already lists them as disabled.
+SUPPORTED_SPORTS = [
     "tennis_wta",
-    "tennis_atp",
-    "icehockey_nhl",
     "icehockey_ahl",
-    "basketball_nba",             # already in core, deduped at runtime
+    "icehockey_nhl",
     "basketball_euroleague",
-    "soccer_australia_aleague",
-    "soccer_scandinavia",
+    "soccer_england_league1",
     "soccer_austria_bundesliga",
     "soccer_poland_ekstraklasa",
-    "soccer_england_league1",
-    "soccer_england_league2",
+    "soccer_france_ligue_one",
 ]
-
-# Combined list (used by fetch() — niche sports come after core)
-SUPPORTED_SPORTS = list(dict.fromkeys(SUPPORTED_SPORTS_CORE + SUPPORTED_SPORTS_NICHE))
 
 DEFAULT_REGIONS = "eu,uk,us"
 DEFAULT_MARKETS = "h2h,totals"
