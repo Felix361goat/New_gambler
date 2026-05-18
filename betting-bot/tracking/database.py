@@ -326,8 +326,12 @@ class DatabaseHandler:
                         "SELECT SUM(stake_recommended) FROM bets WHERE match_date >= date('now', ?)",
                         (f"-{days} days",),
                     ).fetchone()[0] or 0
+                    # Coerce None (no results yet) to 0.0 before arithmetic
+                    total_pnl = d.get("total_pnl") or 0.0
+                    d["total_pnl"] = total_pnl
+                    d["total_staked"] = total_staked
                     d["roi"] = (
-                        (d["total_pnl"] / total_staked * 100)
+                        (total_pnl / total_staked * 100)
                         if total_staked > 0
                         else 0.0
                     )
@@ -409,7 +413,7 @@ class DatabaseHandler:
             with self._get_conn() as conn:
                 rows = conn.execute(
                     """SELECT match_id, match_date, sport, home_team, away_team,
-                              features_json, outcome
+                              features_json, outcome, home_goals, away_goals
                        FROM match_feature_log
                        WHERE outcome IS NOT NULL
                        ORDER BY match_date"""
