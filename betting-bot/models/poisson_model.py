@@ -113,6 +113,8 @@ class PoissonModel:
         return math.exp(-mu) * (mu ** k) / math.factorial(k)
 
     def predict_match(self, home_team: str, away_team: str) -> dict:
+        if not self.fitted:
+            raise RuntimeError("PoissonModel.predict_match() called before fit()")
         mu_h, mu_a = self._predict_goals(home_team, away_team)
         max_goals = 10
 

@@ -28,10 +28,17 @@ ODDS_API_SPORTS = {
     "basketball_romanian": "basketball_euroleague",
     # Legacy generic key
     "basketball":          "basketball_euroleague",
-    # Soccer
-    "soccer_england_tier4": "soccer_england",
-    "soccer_scandinavia":   "soccer_sweden",   # primary Scandinavian fallback
-    "soccer_poland":        "soccer_poland",
+    # Soccer — leagues sourced from The Odds API (use Odds API scores, not football-data.org)
+    # These leagues store Odds API UUID match_ids; football-data.org uses integer IDs
+    # and would always return 404 for these bets.
+    "soccer_england_tier4":          "soccer_england",
+    "soccer_scandinavia":            "soccer_sweden",
+    "soccer_poland":                 "soccer_poland",
+    "soccer_england_league1":        "soccer_england_league1",
+    "soccer_austria_bundesliga":     "soccer_austria_bundesliga",
+    "soccer_poland_ekstraklasa":     "soccer_poland_ekstraklasa",
+    # The league field on bets stores the raw Odds API sport_key, so these
+    # keys must exactly match what _extract_upcoming_from_odds() produces.
 }
 
 # Mapping from bet market to how we label the actual result
@@ -207,7 +214,7 @@ class ResultsSource:
             with db._get_conn() as conn:
                 row = conn.execute(
                     f"""
-                    SELECT MAX({col}) FROM odds_snapshots
+                    SELECT {col} FROM odds_snapshots
                     WHERE match_id = ? AND market = ?
                     ORDER BY captured_at DESC LIMIT 1
                     """,
@@ -446,6 +453,24 @@ class ResultsSource:
                 "skipped": int,   # bets left pending (no result yet / error)
             }
         """
+        # Auto-void bets older than 7 days that are still pending — no API will
+        # ever settle them (match long gone, result unavailable).
+        try:
+            with db._get_conn() as conn:
+                stale = conn.execute(
+                    """
+                    SELECT id FROM bets
+                    WHERE status IN ('placed', 'pending')
+                      AND match_date < date('now', '-7 days')
+                    """
+                ).fetchall()
+                for row in stale:
+                    db.update_bet_status(row[0], "void")
+                if stale:
+                    logger.info(f"Auto-voided {len(stale)} stale bet(s) (>7 days pending)")
+        except Exception as exc:
+            logger.warning(f"Stale-bet void check failed: {exc}")
+
         # Retrieve all unsettled bets up to match_date
         try:
             with db._get_conn() as conn:
@@ -474,8 +499,16 @@ class ResultsSource:
 
         for bet in pending_bets:
             sport = (bet.get("sport") or "soccer").lower()
+            league = (bet.get("league") or "").lower()
             if sport in ("soccer", "football"):
-                football_bets.append(bet)
+                # Bets generated from Odds API have UUID match_ids and store the
+                # Odds API sport_key in the league field. Route these to the Odds
+                # API scores endpoint. Only use football-data.org for bets whose
+                # league is not an Odds API key (legacy bets with integer match_ids).
+                if league in ODDS_API_SPORTS:
+                    non_football_bets.setdefault(league, []).append(bet)
+                else:
+                    football_bets.append(bet)
             elif sport in ODDS_API_SPORTS:
                 non_football_bets.setdefault(sport, []).append(bet)
             else:

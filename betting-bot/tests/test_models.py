@@ -42,9 +42,10 @@ class TestPoissonModel:
         assert abs(pred["over_25_prob"] + pred["under_25_prob"] - 1.0) < 1e-4
 
     def test_predict_unfitted(self):
-        # Should return valid probabilities even without fitting
-        pred = self.model.predict_match("TeamA", "TeamB")
-        assert "home_win_prob" in pred
+        # Unfitted model must raise RuntimeError so the ensemble can catch and skip it
+        import pytest
+        with pytest.raises(RuntimeError):
+            self.model.predict_match("TeamA", "TeamB")
 
     def test_predicted_goals_positive(self):
         df = self._make_matches(60)

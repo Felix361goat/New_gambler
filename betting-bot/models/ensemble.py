@@ -81,6 +81,15 @@ class EnsembleModel:
                     f"Fewer than 2 models available for {home_team} vs {away_team} — skipping"
                 )
                 return None
+            # Guard: ELO with zero fitted ratings means no historical data at all.
+            # Predicting for brand-new teams would assign default 1500 ratings
+            # and produce a confident ~60% home-win that looks like +EV — it isn't.
+            if not self.elo.ratings:
+                logger.error(
+                    f"ELO has no fitted ratings for {home_team} vs {away_team} "
+                    f"— cannot run single-model prediction on empty history"
+                )
+                return None
             logger.info(
                 f"Single-model prediction for {home_team} vs {away_team} "
                 f"(Poisson disabled for sport={sport}, XGBoost not yet trained)"
@@ -112,9 +121,12 @@ class EnsembleModel:
             logger.error(f"All 1x2 probs are zero for {home_team} vs {away_team} — dropping")
             return None
 
-        # Feature completeness — skip internal metadata keys (lists/dicts)
+        # Feature completeness — skip internal metadata keys (lists/dicts).
+        # Expected count is sport-specific: hockey/basketball builders produce
+        # fewer features than soccer; using 30 would always under-score them.
         public_features = {k: v for k, v in features.items() if not k.startswith("_")}
-        expected_features = 30
+        _EXPECTED = {"soccer": 30, "hockey": 18, "basketball": 18, "tennis": 15}
+        expected_features = _EXPECTED.get(sport, 20)
         actual_features = len([v for v in public_features.values() if v != 0])
         feature_completeness = min(1.0, actual_features / expected_features)
 
