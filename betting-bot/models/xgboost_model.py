@@ -147,11 +147,10 @@ class XGBoostModel:
 
     def predict(self, features: dict) -> dict:
         if not self.fitted or self.model_over25 is None:
-            return {
-                "over_25_prob":  0.5, "under_25_prob": 0.5,
-                "over_35_prob":  None, "under_35_prob": None, "btts_prob": None,
-                "home_win_prob": 0.33, "draw_prob": 0.33, "away_win_prob": 0.34,
-            }
+            # Raise so ensemble skips XGBoost entirely — returning 0.33/0.34 noise
+            # would dilute Poisson/ELO signals with 40% random weight and cause
+            # false agreement gate passages on bets with no real XGBoost signal.
+            raise RuntimeError("XGBoostModel.predict() called before training")
 
         X = pd.DataFrame([features])
         for col in self.feature_columns:

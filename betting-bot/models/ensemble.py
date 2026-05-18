@@ -90,6 +90,23 @@ class EnsembleModel:
                     f"— cannot run single-model prediction on empty history"
                 )
                 return None
+            # For single-model predictions both specific teams must have been seen.
+            # An unseen team defaults to 1500 — identical to every other unseen team,
+            # so the ~60% home-win is pure default bias with no real signal.
+            if sport == "tennis":
+                seen_home = home_team in self.elo.tennis_ratings
+                seen_away = away_team in self.elo.tennis_ratings
+            else:
+                seen_home = home_team in self.elo.ratings
+                seen_away = away_team in self.elo.ratings
+            if not (seen_home and seen_away):
+                logger.warning(
+                    f"Single-model skip: ELO has no fitted rating for "
+                    f"{'home' if not seen_home else 'away'} team "
+                    f"({home_team if not seen_home else away_team}) — "
+                    f"default-1500 prediction has no real signal"
+                )
+                return None
             logger.info(
                 f"Single-model prediction for {home_team} vs {away_team} "
                 f"(Poisson disabled for sport={sport}, XGBoost not yet trained)"

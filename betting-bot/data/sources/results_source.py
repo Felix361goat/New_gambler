@@ -312,6 +312,9 @@ class ResultsSource:
             "pnl_simulated": round(pnl, 4),
             "closing_line_odds": closing_odds,
             "clv_score": clv,
+            # Carried for match_feature_log update — not stored in results table
+            "__home_goals": int(home_goals),
+            "__away_goals": int(away_goals),
         }
 
     # ------------------------------------------------------------------
@@ -435,6 +438,9 @@ class ResultsSource:
             "pnl_simulated": round(pnl, 4),
             "closing_line_odds": closing_odds,
             "clv_score": clv,
+            # Carried for match_feature_log update — not stored in results table
+            "__home_goals": home_score,
+            "__away_goals": away_score,
         }
 
     # ------------------------------------------------------------------
@@ -539,9 +545,16 @@ class ResultsSource:
                 logger.info(f"Bet {bet['id']} voided (postponed)")
                 continue
 
+            # Strip private carry fields before DB insert
+            home_g = result.pop("__home_goals", None)
+            away_g = result.pop("__away_goals", None)
             db.insert_result(result)
             db.update_bet_status(bet["id"], "settled")
             outcome = "WON" if result["won"] else "LOST"
+            # Update match_feature_log so retrainer has goals + outcome for this match
+            match_id = bet.get("match_id")
+            if match_id:
+                db.update_match_feature_log_outcome(match_id, outcome, home_g, away_g)
             logger.info(
                 f"Bet {bet['id']} settled: {outcome} | "
                 f"result={result['actual_result']} pnl={result['pnl_simulated']:+.2f}"
@@ -550,7 +563,11 @@ class ResultsSource:
 
         # --- Non-football bets (grouped by sport for one API call each) ---
         for sport, sport_bets in non_football_bets.items():
-            sport_key = ODDS_API_SPORTS[sport]
+            sport_key = ODDS_API_SPORTS.get(sport)
+            if not sport_key:
+                logger.warning(f"No Odds API sport_key for sport={sport!r} — skipping settlement")
+                skipped += len(sport_bets)
+                continue
             scores = self._fetch_odds_api_scores(sport_key, days_from=3)
 
             for bet in sport_bets:
@@ -573,9 +590,14 @@ class ResultsSource:
                     logger.info(f"Bet {bet['id']} voided (postponed)")
                     continue
 
+                home_g = result.pop("__home_goals", None)
+                away_g = result.pop("__away_goals", None)
                 db.insert_result(result)
                 db.update_bet_status(bet["id"], "settled")
                 outcome = "WON" if result["won"] else "LOST"
+                match_id = bet.get("match_id")
+                if match_id:
+                    db.update_match_feature_log_outcome(match_id, outcome, home_g, away_g)
                 logger.info(
                     f"Bet {bet['id']} settled: {outcome} | "
                     f"result={result['actual_result']} pnl={result['pnl_simulated']:+.2f}"

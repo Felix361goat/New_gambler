@@ -28,7 +28,8 @@ def select_daily_bets(
 
     ampel_params: optional AmpelParameter object.  When provided its
                   min_ev_threshold and max_daily_bets override config values.
-                  This is always a downward adjustment — never raises limits.
+                  GELB/ROT raise the EV threshold and reduce max bets — always
+                  more restrictive, never more permissive.
     """
     betting_cfg = config.get("betting", {})
     leagues_cfg = config.get("leagues", {})

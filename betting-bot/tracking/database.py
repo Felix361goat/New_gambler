@@ -132,6 +132,8 @@ CREATE TABLE IF NOT EXISTS match_feature_log (
     away_team TEXT,
     features_json TEXT,
     outcome TEXT,
+    home_goals INTEGER,
+    away_goals INTEGER,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 )
 """
@@ -185,6 +187,12 @@ class DatabaseHandler:
                     if col_name not in existing:
                         conn.execute(f"ALTER TABLE bets ADD COLUMN {col_name} {col_def}")
                         logger.info(f"Added column: bets.{col_name}")
+                # match_feature_log migrations
+                mfl_existing = {row[1] for row in conn.execute("PRAGMA table_info(match_feature_log)").fetchall()}
+                for col_name, col_def in [("home_goals", "INTEGER"), ("away_goals", "INTEGER")]:
+                    if col_name not in mfl_existing:
+                        conn.execute(f"ALTER TABLE match_feature_log ADD COLUMN {col_name} {col_def}")
+                        logger.info(f"Added column: match_feature_log.{col_name}")
                 conn.commit()
         except Exception as e:
             logger.error(f"migrate_schema failed: {e}")
@@ -371,6 +379,28 @@ class DatabaseHandler:
         except Exception as e:
             logger.error(f"insert_match_feature_log failed: {e}")
             return None
+
+    def update_match_feature_log_outcome(
+        self,
+        match_id: str,
+        outcome: str,
+        home_goals: Optional[int] = None,
+        away_goals: Optional[int] = None,
+    ) -> bool:
+        """Mark a logged match with its outcome and final score for retraining."""
+        try:
+            with self._get_conn() as conn:
+                conn.execute(
+                    """UPDATE match_feature_log
+                       SET outcome = ?, home_goals = ?, away_goals = ?
+                       WHERE match_id = ?""",
+                    (outcome, home_goals, away_goals, match_id),
+                )
+                conn.commit()
+            return True
+        except Exception as e:
+            logger.error(f"update_match_feature_log_outcome failed: {e}")
+            return False
 
     def get_match_features_for_retraining(self) -> "pd.DataFrame":
         """Return all logged match features that have an outcome set."""
