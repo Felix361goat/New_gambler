@@ -29,8 +29,10 @@ CRON_JOBS = [
     ("30 16 * * *",  "--brief",         "Brief — afternoon window"),
 
     # ── Fixed daily jobs ──────────────────────────────────────────────────────
-    ("0 */6 * * *",  "--odds_snapshot", "Save odds snapshot every 6h"),
-    ("0 8 * * *",    "--odds_snapshot", "Capture closing odds before morning matches"),
+    # --odds_snapshot is intentionally NOT scheduled: --collect (06:00 and 15:50)
+    # writes an odds cache to disk that --predict reads, keeping total Odds API
+    # usage at 6 sports × 2 collects × 31 days = 372 req/month (< 500 free tier).
+    # Run --odds_snapshot manually only for diagnostic purposes.
     ("30 18 * * *",  "--goalie_check",  "Check goalie status 90min pre-game"),
     ("0 23 * * *",   "--summarize",     "Send evening summary"),
     ("0 10 * * *",   "--results",       "Settle yesterday's results"),

@@ -349,14 +349,32 @@ def cmd_setup(config: dict):
 
 
 def cmd_collect(config: dict):
-    """Fetch all data sources."""
+    """Fetch all data sources and write odds cache for --predict to reuse."""
+    import pickle
     from data.collector import DataCollector
     from tracking.database import DatabaseHandler
+    from datetime import datetime, timezone
 
     db = DatabaseHandler()
     collector = DataCollector(config, db)
     result = collector.collect_all()
     print(result.summary())
+
+    # Persist odds DataFrame to disk so --predict can reuse it without another
+    # API call.  Cache is valid for ODDS_CACHE_MAX_AGE_H hours (see cmd_predict).
+    odds_df = result.data.get("odds")
+    if odds_df is not None:
+        cache_path = ROOT / "data" / "latest_odds_cache.pkl"
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(cache_path, "wb") as _f:
+                pickle.dump(
+                    {"odds": odds_df, "collected_at": datetime.now(timezone.utc).isoformat()},
+                    _f,
+                )
+        except Exception as _e:
+            logger.warning(f"Failed to write odds cache: {_e}")
+
     return result
 
 
@@ -426,8 +444,38 @@ def cmd_predict(config: dict):
     elo_path = str(ROOT / "data" / "elo_ratings.pkl")
     elo.load(elo_path)
 
-    # Fit on historical match data if available
-    collection = collector.collect_all()
+    # ── Odds API budget guard ──────────────────────────────────────────────────
+    # --collect runs 2×/day and caches the odds DataFrame to disk.
+    # --predict reads from cache (0 extra API calls) unless the cache is older
+    # than ODDS_CACHE_MAX_AGE_H hours, in which case it fetches fresh odds once.
+    # This keeps total usage at 6 sports × 2 collects × 31 days = 372 req/month
+    # (well within the 500/month free-tier limit).
+    ODDS_CACHE_MAX_AGE_H = 7.0  # accept cache up to 7h old (6am cache OK until 1pm)
+    import pickle
+    from datetime import datetime, timezone as _tz
+    _cache_path = ROOT / "data" / "latest_odds_cache.pkl"
+    _odds_df_cached = None
+    if _cache_path.exists():
+        try:
+            with open(_cache_path, "rb") as _cf:
+                _cached = pickle.load(_cf)
+            _collected_at = datetime.fromisoformat(_cached["collected_at"])
+            _age_h = (datetime.now(_tz.utc) - _collected_at).total_seconds() / 3600
+            if _age_h <= ODDS_CACHE_MAX_AGE_H:
+                _odds_df_cached = _cached.get("odds")
+                logger.info(f"Using cached odds ({_age_h:.1f}h old, within {ODDS_CACHE_MAX_AGE_H}h TTL)")
+            else:
+                logger.info(f"Cache expired ({_age_h:.1f}h old > {ODDS_CACHE_MAX_AGE_H}h TTL) — fetching fresh odds")
+        except Exception as _ce:
+            logger.warning(f"Cache read failed: {_ce} — fetching fresh odds")
+
+    if _odds_df_cached is not None:
+        # Use cache: skip odds API call, only fetch historical/non-odds sources
+        collection = collector.collect_no_odds()
+        collection.set("odds", _odds_df_cached)
+    else:
+        # Cache stale or missing: fetch everything including fresh odds
+        collection = collector.collect_all()
 
     # --- FIX: CollectionResult stores data in .data dict, not as attributes ---
     football_df = collection.data.get("football_matches")
@@ -572,9 +620,10 @@ def cmd_predict(config: dict):
         if not home or not away:
             continue
 
-        # Staleness guard: skip matches where odds are >4h old AND kickoff <2h away.
-        # At that point line movement is invisible to our model and EV is unreliable.
-        if _data_age_hours > 4.0:
+        # Staleness guard: skip matches where odds are old AND kickoff is imminent.
+        # Threshold aligned with ODDS_CACHE_MAX_AGE_H (7h) so cached morning-collect
+        # odds are still usable at the 12pm predict window.
+        if _data_age_hours > 7.0:
             kickoff_raw = match_dict.get("kickoff_time")
             if kickoff_raw is not None:
                 try:
@@ -771,7 +820,12 @@ def cmd_brief(config: dict):
 
 
 def cmd_odds_snapshot(config: dict):
-    """Save current odds snapshot to DB."""
+    """Save current odds snapshot to DB (manual diagnostic tool).
+
+    NOTE: This command is intentionally NOT scheduled — --collect already
+    caches odds to disk (data/latest_odds_cache.pkl) so --predict can reuse
+    them without extra API calls.  Run this only for manual diagnostics.
+    """
     from tracking.database import DatabaseHandler
     from data.sources.odds_api import OddsAPISource
 
@@ -783,18 +837,38 @@ def cmd_odds_snapshot(config: dict):
         print("⚠️  No odds data retrieved")
         return
 
+    # OddsAPISource.normalize() returns long-format rows.
+    # Pivot outcome_name→side price into snapshot columns.
+    OUTCOME_COL = {
+        "home":  "odds_home",
+        "away":  "odds_away",
+        "draw":  "odds_draw",
+        "over":  "odds_over",
+        "under": "odds_under",
+    }
+
     count = 0
+    grouped: dict = {}
     for _, row in (data.iterrows() if hasattr(data, "iterrows") else []):
-        snapshot = {
-            "match_id": row.get("match_id", ""),
-            "bookmaker": row.get("bookmaker", ""),
-            "market": row.get("market", ""),
-            "odds_home": row.get("odds_home"),
-            "odds_draw": row.get("odds_draw"),
-            "odds_away": row.get("odds_away"),
-            "odds_over": row.get("odds_over"),
-            "odds_under": row.get("odds_under"),
-        }
+        key = (
+            row.get("event_id", ""),
+            row.get("bookmaker_key", ""),
+            row.get("market", ""),
+        )
+        if key not in grouped:
+            grouped[key] = {
+                "match_id": row.get("event_id", ""),
+                "bookmaker": row.get("bookmaker_key", ""),
+                "market": row.get("market", ""),
+                "odds_home": None, "odds_draw": None, "odds_away": None,
+                "odds_over": None, "odds_under": None,
+            }
+        outcome = str(row.get("outcome_name", "")).lower()
+        col = OUTCOME_COL.get(outcome)
+        if col:
+            grouped[key][col] = row.get("price")
+
+    for snapshot in grouped.values():
         if db.insert_odds_snapshot(snapshot):
             count += 1
 
@@ -810,19 +884,46 @@ def cmd_summarize(config: dict):
 
     db = DatabaseHandler()
     tracker = PerformanceTracker(db, config)
-    bets = db.get_pending_bets(date.today())
-    # Include placed bets too
+
+    # Fetch all today's bets joined with their results so won/pnl_simulated
+    # are available at the top level of each bet dict.
     try:
         with db._get_conn() as conn:
             rows = conn.execute(
-                "SELECT * FROM bets WHERE match_date = ?", (str(date.today()),)
+                """SELECT b.*, r.won, r.pnl_simulated, r.clv_score
+                   FROM bets b
+                   LEFT JOIN results r ON r.bet_id = b.id
+                   WHERE b.match_date = ?
+                   ORDER BY b.id""",
+                (str(date.today()),),
             ).fetchall()
             all_bets = [dict(r) for r in rows]
     except Exception:
-        all_bets = bets
+        all_bets = []
 
     db.update_daily_performance(date.today())
+
+    # Read actual today P&L from performance table (just written above).
     perf_today = {"pnl_daily": 0.0}
+    try:
+        with db._get_conn() as conn:
+            row = conn.execute(
+                "SELECT pnl_daily FROM performance WHERE date = ?",
+                (str(date.today()),),
+            ).fetchone()
+            if row:
+                perf_today["pnl_daily"] = row[0] or 0.0
+            clv_row = conn.execute(
+                """SELECT AVG(r.clv_score) FROM results r
+                   JOIN bets b ON b.id = r.bet_id
+                   WHERE b.match_date = ? AND r.clv_score IS NOT NULL""",
+                (str(date.today()),),
+            ).fetchone()
+            if clv_row and clv_row[0] is not None:
+                perf_today["clv_today"] = round(clv_row[0] * 100, 2)
+    except Exception:
+        pass
+
     perf_total = tracker.get_full_summary()
 
     message = format_evening_summary(all_bets, perf_today, perf_total)
@@ -887,7 +988,33 @@ def cmd_weekly_report(config: dict):
     db = DatabaseHandler()
     tracker = PerformanceTracker(db, config)
     perf = tracker.get_full_summary()
-    message = format_weekly_report(perf)
+    perf["min_paper_bets"] = config.get("betting", {}).get("min_paper_bets_before_live", 500)
+
+    league_stats: dict = {}
+    try:
+        with db._get_conn() as conn:
+            rows = conn.execute(
+                """SELECT b.league,
+                          SUM(r.pnl_simulated) as pnl,
+                          SUM(b.stake_recommended) as staked,
+                          COUNT(*) as total,
+                          SUM(CASE WHEN r.won=1 THEN 1 ELSE 0 END) as won
+                   FROM bets b
+                   JOIN results r ON r.bet_id = b.id
+                   WHERE r.pnl_simulated IS NOT NULL
+                   GROUP BY b.league"""
+            ).fetchall()
+            for row in rows:
+                rd = dict(row)
+                league = rd.get("league") or "unknown"
+                staked = rd.get("staked") or 0.0
+                pnl = rd.get("pnl") or 0.0
+                roi = (pnl / staked * 100) if staked > 0 else 0.0
+                league_stats[league] = {"roi": roi, "total": rd.get("total", 0), "pnl": pnl}
+    except Exception:
+        pass
+
+    message = format_weekly_report(perf, league_stats if league_stats else None)
     bot = TelegramBotHandler(config, db)
     success = bot.send_message_sync(message)
     print("✅ Weekly report sent" if success else "❌ Failed to send weekly report")

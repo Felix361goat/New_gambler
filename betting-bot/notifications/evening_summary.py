@@ -14,14 +14,14 @@ def format_evening_summary(bets: list, performance_today: dict, performance_tota
 
     won = lost = pending = 0
     for bet in bets:
-        status = bet.get("status", "pending")
-        result = bet.get("result", {})
         match_str = f"{bet.get('home_team', '?')} vs {bet.get('away_team', '?')}"
         market = bet.get("market", "?")
+        # won/pnl_simulated are top-level after the LEFT JOIN in cmd_summarize
+        bet_won = bet.get("won")
 
-        if status in ("placed",) and result.get("won") is not None:
-            is_won = result.get("won", False)
-            pnl = result.get("pnl_simulated", 0)
+        if bet_won is not None:
+            is_won = bool(bet_won)
+            pnl = bet.get("pnl_simulated", 0) or 0
             icon = "✅" if is_won else "❌"
             check = "✓" if is_won else "✗"
             if is_won:

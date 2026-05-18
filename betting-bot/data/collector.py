@@ -354,6 +354,23 @@ class DataCollector:
         self._collect_odds(result)
         return result
 
+    def collect_no_odds(self) -> CollectionResult:
+        """Fetch all sources EXCEPT the Odds API.
+
+        Used by --predict when odds are loaded from cache instead of the API,
+        keeping total Odds API requests within the free-tier budget of 500/month.
+        """
+        result = CollectionResult()
+        self._collect_football(result)
+        self._collect_understat(result)
+        self._collect_transfermarkt(result)
+        self._collect_nba(result)
+        self._collect_news(result)
+        self._collect_hockey(result)
+        self._collect_basketball_lower(result)
+        self._collect_tennis(result)
+        return result
+
     def collect_nba_only(self) -> CollectionResult:
         """Convenience method – only fetch NBA data."""
         result = CollectionResult()

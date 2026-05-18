@@ -145,6 +145,13 @@ class TelegramBotHandler:
             logger.error(f"_cmd_status failed: {e}")
             await update.message.reply_text(f"❌ Fehler: {e}")
 
+    async def _reply_long(self, update, msg: str) -> None:
+        """Split and send messages exceeding Telegram's 4096-char limit."""
+        max_len = 4096
+        parts = [msg[i:i + max_len] for i in range(0, len(msg), max_len)]
+        for part in parts:
+            await update.message.reply_text(part, parse_mode="HTML")
+
     async def _cmd_bets(self, update, context):
         try:
             from notifications.morning_briefing import format_morning_briefing
@@ -153,7 +160,7 @@ class TelegramBotHandler:
             bets = self.db.get_pending_bets(date.today())
             perf = tracker.get_full_summary()
             msg = format_morning_briefing(bets, perf)
-            await update.message.reply_text(msg, parse_mode="HTML")
+            await self._reply_long(update, msg)
         except Exception as e:
             logger.error(f"_cmd_bets failed: {e}")
             await update.message.reply_text(f"❌ Fehler: {e}")
@@ -164,8 +171,9 @@ class TelegramBotHandler:
             from tracking.performance import PerformanceTracker
             tracker = PerformanceTracker(self.db, self.config)
             perf = tracker.get_full_summary()
+            perf["min_paper_bets"] = self.config.get("betting", {}).get("min_paper_bets_before_live", 500)
             msg = format_weekly_report(perf)
-            await update.message.reply_text(msg, parse_mode="HTML")
+            await self._reply_long(update, msg)
         except Exception as e:
             logger.error(f"_cmd_week failed: {e}")
             await update.message.reply_text(f"❌ Fehler: {e}")

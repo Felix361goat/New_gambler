@@ -47,9 +47,9 @@ class PerformanceTracker:
                 ).fetchone()[0]
             days_running = 0
             if first_bet:
-                from datetime import datetime as _dt
-                start = _dt.fromisoformat(str(first_bet).split(".")[0])
-                days_running = ((_dt.utcnow() - start).days)
+                from datetime import datetime as _dt, timezone as _tz
+                start = _dt.fromisoformat(str(first_bet).split(".")[0]).replace(tzinfo=None)
+                days_running = (_dt.now(_tz.utc).replace(tzinfo=None) - start).days
         except Exception:
             days_running = 0
         return settled >= min_bets and days_running >= min_days and roi > min_roi
@@ -79,9 +79,23 @@ class PerformanceTracker:
 
     def calculate_max_drawdown_pct(self, days: int = 90) -> float:
         abs_drawdown = self.calculate_max_drawdown(days)
-        if self.starting_bankroll <= 0:
+        if abs_drawdown <= 0:
             return 0.0
-        return round((abs_drawdown / self.starting_bankroll) * 100, 2)
+        # Divide by peak bankroll over the lookback window, not fixed starting bankroll.
+        # Starting bankroll as fallback when no performance rows exist yet.
+        try:
+            with self.db._get_conn() as conn:
+                peak_pnl_row = conn.execute(
+                    "SELECT MAX(pnl_cumulative) FROM performance WHERE date >= date('now', ?)",
+                    (f"-{days} days",),
+                ).fetchone()
+            peak_pnl = (peak_pnl_row[0] or 0.0) if peak_pnl_row else 0.0
+            peak_bankroll = self.starting_bankroll + peak_pnl
+        except Exception:
+            peak_bankroll = self.starting_bankroll
+        if peak_bankroll <= 0:
+            return 0.0
+        return round((abs_drawdown / peak_bankroll) * 100, 2)
 
     def check_clv_gate(self, db=None, min_bets: int = 30) -> tuple[bool, Optional[float]]:
         """

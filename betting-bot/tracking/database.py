@@ -323,7 +323,11 @@ class DatabaseHandler:
                 if row:
                     d = dict(row)
                     total_staked = conn.execute(
-                        "SELECT SUM(stake_recommended) FROM bets WHERE match_date >= date('now', ?)",
+                        """SELECT SUM(b.stake_recommended)
+                           FROM bets b
+                           JOIN results r ON r.bet_id = b.id
+                           WHERE b.match_date >= date('now', ?)
+                           AND r.pnl_simulated IS NOT NULL""",
                         (f"-{days} days",),
                     ).fetchone()[0] or 0
                     # Coerce None (no results yet) to 0.0 before arithmetic

@@ -8,8 +8,9 @@ import pandas as pd
 from .base_source import BaseSource
 
 
-# 8 sport keys chosen to stay within the free-tier budget of 500 req/month.
-# Budget: 8 keys × 2 collects/day × 31 days = 496 req/month.
+# 6 sport keys chosen to stay within the free-tier budget of 500 req/month.
+# Budget: 6 keys × 2 collects/day × 31 days = 372 req/month (< 500 limit).
+# --predict reads from the collect cache (no extra API calls).
 # Keys are niche/mid-tier markets where line inefficiency is highest.
 # Top-tier leagues (EPL, La Liga, Bundesliga) are excluded — bookmakers
 # have the edge there and the config already lists them as disabled.

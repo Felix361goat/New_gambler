@@ -67,7 +67,7 @@ def calculate_team_form(team_id: str, matches_df: pd.DataFrame, weights_config: 
     # externally in h2h.py — exclude it here so the score stays in [0, 100].
     used_weights = (
         w.get("last_5_games", 0.35)
-        + w.get("last_10_to_20_games", 0.25)
+        + (w.get("last_10_to_20_games", 0.25) if last10_20 else 0.0)
         + (w.get("full_current_season", 0.15) if full_season else 0.0)
         + (w.get("last_2_to_3_seasons", 0.15) if last_seasons else 0.0)
     )

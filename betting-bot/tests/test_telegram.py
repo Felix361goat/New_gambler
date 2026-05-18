@@ -58,10 +58,11 @@ class TestMorningBriefing:
 
 class TestEveningSummary:
     def test_basic_summary(self):
+        # won/pnl_simulated are top-level after the LEFT JOIN in cmd_summarize
         bets = [{
             "id": 1, "home_team": "Arsenal", "away_team": "Chelsea",
             "market": "over_2.5", "status": "placed",
-            "result": {"won": True, "pnl_simulated": 15.0},
+            "won": True, "pnl_simulated": 15.0,
         }]
         msg = format_evening_summary(bets, {"pnl_daily": 15.0}, {"total_pnl": 15.0, "roi": 1.5})
         assert "Arsenal" in msg
@@ -71,7 +72,7 @@ class TestEveningSummary:
         bets = [{
             "id": 1, "home_team": "Bayern", "away_team": "Dortmund",
             "market": "1x2_home", "status": "pending",
-            "result": {},
+            "won": None, "pnl_simulated": None,
         }]
         msg = format_evening_summary(bets, {"pnl_daily": 0.0}, {"total_pnl": 0.0, "roi": 0.0})
         assert "⏳" in msg

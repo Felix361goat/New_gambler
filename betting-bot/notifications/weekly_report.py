@@ -8,7 +8,7 @@ def format_weekly_report(performance: dict, league_stats: dict = None) -> str:
     today = date.today()
     week_num = today.isocalendar()[1]
     settled = performance.get("settled_bets", 0)
-    min_paper = 200
+    min_paper = performance.get("min_paper_bets", 500)
     remaining = max(0, min_paper - settled)
 
     lines = [f"📊 WOCHEN-REPORT KW {week_num}\n"]
@@ -34,7 +34,7 @@ def format_weekly_report(performance: dict, league_stats: dict = None) -> str:
     lines.append(f"Modell-Empfehlung: {insight}")
     lines.append("")
     lines.append("Retraining: ✅ Sonntag 03:00 Uhr")
-    lines.append(f"Paper Mode: {settled}/200 | {remaining} bis Live möglich")
+    lines.append(f"Paper Mode: {settled}/{min_paper} | {remaining} bis Live möglich")
 
     return "\n".join(lines)
 
