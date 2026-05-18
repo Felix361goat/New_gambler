@@ -10,7 +10,7 @@ def format_morning_briefing(bets: list, performance: dict) -> str:
         return (
             "🎯 BETTING BRIEFING — Heute keine qualifizierenden Bets\n\n"
             "Kein Bet hat heute die EV-Schwelle (3%) erreicht.\n"
-            f"📋 Paper Mode: {performance.get('settled_bets', 0)}/200"
+            f"📋 Paper Mode: {performance.get('settled_bets', 0)}/500"
         )
 
     today = date.today()
@@ -77,7 +77,7 @@ def format_morning_briefing(bets: list, performance: dict) -> str:
     lines.append(
         f"\n📊 Heute: {len(bets)} Bets | Ø EV: +{avg_ev:.1f}%\n"
         f"💰 Sim. Bankroll: €{bankroll:.2f} ({pct_change:+.1f}%)\n"
-        f"📋 Paper Mode: {settled}/200\n\n"
+        f"📋 Paper Mode: {settled}/500\n\n"
         f"Tippe /placed N oder /skip N"
     )
 

@@ -69,9 +69,22 @@ class EnsembleModel:
         except Exception as e:
             logger.warning(f"ELO prediction failed: {e}")
 
-        if len(predictions) < 2:
-            logger.error("Fewer than 2 models available — cannot generate prediction")
+        if len(predictions) == 0:
+            logger.error(f"No models available for {home} vs {away}")
             return None
+        if len(predictions) < 2:
+            # Poisson is intentionally disabled for tennis and basketball.
+            # When XGBoost is also unavailable (not yet trained), allow a
+            # single-model ELO prediction rather than silently dropping all bets.
+            if self.w_poisson > 0:
+                logger.error(
+                    f"Fewer than 2 models available for {home} vs {away} — skipping"
+                )
+                return None
+            logger.info(
+                f"Single-model prediction for {home} vs {away} "
+                f"(Poisson disabled for sport={sport}, XGBoost not yet trained)"
+            )
 
         market = features.get("target_market", "1x2")
         if not self._models_agree([p[1] for p in predictions], market=market):
@@ -134,8 +147,11 @@ class EnsembleModel:
         return result
 
     def _models_agree(self, predictions: list, market: str = "1x2") -> bool:
-        if len(predictions) < 2:
+        if len(predictions) == 0:
             return False
+        if len(predictions) == 1:
+            # Single model (Poisson disabled + XGBoost not trained) — treat as self-agreeing
+            return True
 
         def outcome_and_prob(pred):
             # Use market-appropriate probability keys

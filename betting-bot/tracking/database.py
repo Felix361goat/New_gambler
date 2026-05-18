@@ -116,6 +116,10 @@ CREATE TABLE IF NOT EXISTS user_interactions (
 )
 """
 
+# Tracks which predict window generated the bet and whether the brief was sent
+# brief_sent_at: NULL = not yet sent, ISO timestamp = already sent in a brief
+# predict_window: 'morning' | 'midday' | 'afternoon' | NULL (legacy single-window)
+
 CREATE_MATCH_FEATURE_LOG = """
 CREATE TABLE IF NOT EXISTS match_feature_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -168,6 +172,9 @@ class DatabaseHandler:
             ("matchfixing_warning", "TEXT"),
             ("bookie_implied_prob", "REAL"),
             ("our_edge", "REAL"),
+            # Multi-window scheduling columns (added 2025)
+            ("predict_window", "TEXT DEFAULT NULL"),        # 'morning'|'midday'|'afternoon'
+            ("brief_sent_at", "TIMESTAMP DEFAULT NULL"),    # NULL = not yet briefed
         ]
         try:
             with self._get_conn() as conn:
@@ -242,6 +249,48 @@ class DatabaseHandler:
         except Exception as e:
             logger.error(f"get_pending_bets failed: {e}")
             return []
+
+    def get_unbriefed_bets(self, target_date: date) -> list:
+        """Return all today's pending bets that have not yet been included in a brief.
+
+        Used by the multi-window --brief command so each window only sends NEW bets,
+        preventing duplicates across morning / midday / afternoon briefs.
+        """
+        try:
+            with self._get_conn() as conn:
+                rows = conn.execute(
+                    """SELECT * FROM bets
+                       WHERE match_date = ?
+                         AND status = 'pending'
+                         AND brief_sent_at IS NULL
+                       ORDER BY id ASC""",
+                    (str(target_date),),
+                ).fetchall()
+                return [dict(r) for r in rows]
+        except Exception as e:
+            logger.error(f"get_unbriefed_bets failed: {e}")
+            return []
+
+    def mark_bets_as_briefed(self, bet_ids: list) -> bool:
+        """Stamp brief_sent_at = now for all given bet IDs.
+
+        Call this immediately after a successful Telegram send so the same bets
+        are never included in a subsequent brief window.
+        """
+        if not bet_ids:
+            return True
+        try:
+            placeholders = ",".join(["?"] * len(bet_ids))
+            with self._get_conn() as conn:
+                conn.execute(
+                    f"UPDATE bets SET brief_sent_at = CURRENT_TIMESTAMP WHERE id IN ({placeholders})",
+                    bet_ids,
+                )
+                conn.commit()
+                return True
+        except Exception as e:
+            logger.error(f"mark_bets_as_briefed failed: {e}")
+            return False
 
     def get_performance_summary(self, days: int = 30) -> dict:
         try:

@@ -266,3 +266,44 @@ logging:
   weekly_summary: true
   log_path: "data/bets.log"
   matchfixing_log_path: "data/matchfixing_flags.log"
+
+# ── Multi-window scheduling ────────────────────────────────────────────────────
+# --predict runs 3× per day.  Each run detects its own window from the clock
+# and only generates bets for matches kicking off inside that window's range.
+# --brief always sends only unbriefed bets (brief_sent_at IS NULL in DB),
+# preventing duplicates across windows.
+#
+# Window definitions (CET/CEST):
+#   morning   07:30 predict → matches kicking off before 13:00 today
+#   midday    12:00 predict → matches kicking off 13:00–18:30 today
+#   afternoon 16:00 predict → matches kicking off 18:30–23:59 today
+#
+# min_lead_hours: never generate a bet if kickoff is sooner than this.
+#   Ensures odds are still pre-game and not razor-thin market.
+scheduling:
+  timezone: "Europe/Vienna"
+  min_lead_hours: 1.0           # must be at least 1h before kickoff
+  windows:
+    morning:
+      predict_hour: 7
+      predict_minute: 30
+      brief_hour: 8
+      brief_minute: 30
+      kickoff_from_hour: 0      # any match from midnight
+      kickoff_to_hour: 13       # up to but not including 13:00
+    midday:
+      predict_hour: 12
+      predict_minute: 0
+      brief_hour: 12
+      brief_minute: 30
+      kickoff_from_hour: 13
+      kickoff_to_hour: 18       # up to but not including 18:30 (18.5)
+      kickoff_to_minute: 30
+    afternoon:
+      predict_hour: 16
+      predict_minute: 0
+      brief_hour: 16
+      brief_minute: 30
+      kickoff_from_hour: 18
+      kickoff_from_minute: 30
+      kickoff_to_hour: 24       # midnight = end of day

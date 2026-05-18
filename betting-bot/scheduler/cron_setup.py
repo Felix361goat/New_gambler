@@ -7,16 +7,37 @@ import logging
 logger = logging.getLogger(__name__)
 
 CRON_JOBS = [
-    ("0 6 * * *",    "--collect",       "Collect all data"),
-    ("30 7 * * *",   "--predict",       "Run prediction engine"),
-    ("30 8 * * *",   "--brief",         "Send morning briefing"),
-    ("0 */6 * * *",  "--odds_snapshot", "Save odds snapshot"),
+    # ── Data collection: runs before each predict window ──────────────────────
+    # 06:00  morning baseline
+    # 11:50  before midday predict (12:00) — 10 min margin
+    # 15:50  before afternoon predict (16:00) — 10 min margin
+    ("0 6 * * *",    "--collect",       "Collect data — morning baseline"),
+    ("50 11 * * *",  "--collect",       "Collect data — pre-midday"),
+    ("50 15 * * *",  "--collect",       "Collect data — pre-afternoon"),
+
+    # ── Predict: 3 windows, window auto-detected from clock ───────────────────
+    # morning   07:30 → matches kicking off before 13:00
+    # midday    12:00 → matches kicking off 13:00-18:30
+    # afternoon 16:00 → matches kicking off 18:30-midnight
+    ("30 7 * * *",   "--predict",       "Predict — morning window (kickoff before 13:00)"),
+    ("0 12 * * *",   "--predict",       "Predict — midday window (kickoff 13:00-18:30)"),
+    ("0 16 * * *",   "--predict",       "Predict — afternoon window (kickoff 18:30-midnight)"),
+
+    # ── Brief: runs 30 min after each predict, sends only new (unbriefed) bets ─
+    ("30 8 * * *",   "--brief",         "Brief — morning window"),
+    ("30 12 * * *",  "--brief",         "Brief — midday window"),
+    ("30 16 * * *",  "--brief",         "Brief — afternoon window"),
+
+    # ── Fixed daily jobs ──────────────────────────────────────────────────────
+    ("0 */6 * * *",  "--odds_snapshot", "Save odds snapshot every 6h"),
+    ("30 18 * * *",  "--goalie_check",  "Check goalie status 90min pre-game"),
     ("0 23 * * *",   "--summarize",     "Send evening summary"),
-    ("0 3 * * 0",    "--retrain",       "Retrain models"),
-    ("0 20 * * 0",   "--weekly_report", "Send weekly report"),
     ("0 10 * * *",   "--results",       "Settle yesterday's results"),
     ("0 9 * * *",    "--healthcheck",   "Daily health check"),
-    ("30 18 * * *",  "--goalie_check",  "Check goalie status pre-game"),
+
+    # ── Weekly jobs ───────────────────────────────────────────────────────────
+    ("0 3 * * 0",    "--retrain",       "Retrain models (Sunday 03:00)"),
+    ("0 20 * * 0",   "--weekly_report", "Send weekly report (Sunday 20:00)"),
 ]
 
 
@@ -48,8 +69,10 @@ def install_cron_jobs(main_script: Path):
 
     for schedule, arg, comment in CRON_JOBS:
         job_line = f"{schedule} {python} {main_path} {arg}  # betting-bot: {comment}"
-        if any(f"main.py {arg}" in line for line in lines):
-            logger.info(f"Cron job already exists: {arg}")
+        # Match on the full job_line (schedule + script + arg) to allow multiple
+        # predict/collect/brief entries with different schedules to coexist
+        if any(job_line.split("  #")[0] in line for line in lines):
+            logger.info(f"Cron job already exists: {schedule} {arg}")
             continue
         lines.append(job_line)
         added += 1

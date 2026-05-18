@@ -28,6 +28,7 @@ sys.path.insert(0, str(ROOT))
 
 from dotenv import load_dotenv
 import yaml
+import pytz
 
 load_dotenv()
 
@@ -40,6 +41,121 @@ logging.basicConfig(
     ],
 )
 logger = logging.getLogger("main")
+
+
+def _detect_predict_window(config: dict) -> tuple[str, "datetime", "datetime"]:
+    """Auto-detect which scheduling window --predict is running in.
+
+    Returns (window_name, kickoff_from_dt, kickoff_to_dt) where both datetimes
+    are timezone-aware and represent the kickoff range for today.
+
+    The window is determined by comparing the current local time against the
+    window boundary definitions in config.scheduling.windows.  If the current
+    time falls outside all defined windows (e.g. manual run at 03:00) the
+    function falls back to 'morning' so the pipeline still produces output.
+
+    Crucially, kickoff_from_dt is never earlier than ``now + min_lead_hours`` so
+    we never generate a bet that is already too close to kickoff.
+    """
+    from datetime import datetime, timedelta, timezone as dt_timezone
+    import pytz
+
+    sched = config.get("scheduling", {})
+    tz_name = sched.get("timezone", "Europe/Vienna")
+    min_lead = sched.get("min_lead_hours", 1.0)
+    windows = sched.get("windows", {})
+
+    try:
+        tz = pytz.timezone(tz_name)
+    except Exception:
+        tz = pytz.utc
+
+    now = datetime.now(tz)
+    today = now.date()
+    now_minutes = now.hour * 60 + now.minute
+
+    # Build a sorted list of (window_name, predict_start_minutes, predict_end_minutes)
+    # predict window is active from predict_hour:minute until the next window's
+    # predict_hour:minute (or end of day for the last window)
+    ordered = ["morning", "midday", "afternoon"]
+    window_starts = {}
+    for wname in ordered:
+        wcfg = windows.get(wname, {})
+        wh = wcfg.get("predict_hour", 0)
+        wm = wcfg.get("predict_minute", 0)
+        window_starts[wname] = wh * 60 + wm
+
+    # Determine active window: last window whose start <= now
+    active = ordered[0]  # default fallback
+    for wname in ordered:
+        if now_minutes >= window_starts[wname]:
+            active = wname
+
+    wcfg = windows.get(active, {})
+
+    # Build kickoff_from datetime (local time, today)
+    from_h = wcfg.get("kickoff_from_hour", 0)
+    from_m = wcfg.get("kickoff_from_minute", 0)
+    kickoff_from_naive = datetime(today.year, today.month, today.day, from_h, from_m)
+    kickoff_from_dt = tz.localize(kickoff_from_naive)
+
+    # Build kickoff_to datetime
+    to_h = wcfg.get("kickoff_to_hour", 24)
+    to_m = wcfg.get("kickoff_to_minute", 0)
+    if to_h >= 24:
+        # End of day — use tomorrow midnight
+        kickoff_to_dt = tz.localize(
+            datetime(today.year, today.month, today.day, 23, 59, 59)
+        )
+    else:
+        kickoff_to_naive = datetime(today.year, today.month, today.day, to_h, to_m)
+        kickoff_to_dt = tz.localize(kickoff_to_naive)
+
+    # Enforce min_lead_hours: never bet on a match kicking off within the next N hours
+    earliest_allowed = now + timedelta(hours=min_lead)
+    if kickoff_from_dt < earliest_allowed:
+        kickoff_from_dt = earliest_allowed
+
+    logger.info(
+        f"predict window='{active}' kickoff range: "
+        f"{kickoff_from_dt.strftime('%H:%M')}–{kickoff_to_dt.strftime('%H:%M')} {tz_name}"
+    )
+    return active, kickoff_from_dt, kickoff_to_dt
+
+
+def _count_bets_today(db) -> int:
+    """Count how many bets have already been generated today (all windows)."""
+    try:
+        with db._get_conn() as conn:
+            return conn.execute(
+                "SELECT COUNT(*) FROM bets WHERE match_date = date('now')"
+            ).fetchone()[0] or 0
+    except Exception:
+        return 0
+
+
+def _kickoff_in_window(kickoff, from_dt, to_dt) -> bool:
+    """Return True if a match kickoff falls within [from_dt, to_dt).
+
+    Handles None kickoff (treated as unknown → include), naive datetimes
+    (assumed UTC), and ISO-format strings.
+    """
+    from datetime import datetime, timezone as dt_timezone
+    import pytz
+
+    if kickoff is None:
+        return True  # Unknown kickoff — include and let the 1h gate catch it
+
+    if isinstance(kickoff, str):
+        try:
+            kickoff = datetime.fromisoformat(kickoff)
+        except Exception:
+            return True  # Unparseable — don't exclude
+
+    if kickoff.tzinfo is None:
+        kickoff = kickoff.replace(tzinfo=dt_timezone.utc)
+
+    return from_dt <= kickoff < to_dt
 
 
 def load_config() -> dict:
@@ -60,6 +176,129 @@ def load_config() -> dict:
             return [resolve(i) for i in obj]
         return obj
     return resolve(raw)
+
+
+# ---------------------------------------------------------------------------
+# Scheduling helpers
+# ---------------------------------------------------------------------------
+
+import pandas as pd
+from datetime import datetime, timezone, timedelta
+
+
+def _extract_upcoming_from_odds(odds_df) -> "Optional[pd.DataFrame]":
+    """Build upcoming-matches DataFrame from the OddsAPI normalized odds data.
+
+    Only events starting between 1 hour and 36 hours from now are included so
+    we never generate bets with less than 1h lead-time (closing odds) or more
+    than 36h in advance (odds too noisy).
+
+    Returns columns: match_id, sport, league, home_team, away_team, date, kickoff_time
+    """
+    if odds_df is None or (hasattr(odds_df, "empty") and odds_df.empty):
+        return None
+
+    SPORT_MAP = {
+        "tennis_wta": "tennis", "tennis_atp": "tennis",
+        "icehockey_nhl": "hockey", "icehockey_ahl": "hockey",
+        "icehockey_echl": "hockey",
+        "basketball_nba": "basketball", "basketball_euroleague": "basketball",
+        "basketball_wnba": "basketball",
+    }
+
+    event_cols = [c for c in ("event_id", "sport", "home_team", "away_team", "commence_time")
+                  if c in odds_df.columns]
+    if "event_id" not in event_cols:
+        return None
+
+    events = odds_df[event_cols].drop_duplicates(subset=["event_id"]).copy()
+    events["kickoff_dt"] = pd.to_datetime(
+        events["commence_time"] if "commence_time" in events.columns else events.get("kickoff_time"),
+        utc=True, errors="coerce"
+    )
+
+    now = datetime.now(timezone.utc)
+    events = events.dropna(subset=["kickoff_dt"])
+    events = events[
+        (events["kickoff_dt"] >= now + timedelta(hours=1)) &
+        (events["kickoff_dt"] <= now + timedelta(hours=36))
+    ]
+
+    if events.empty:
+        return None
+
+    events = events.rename(columns={"event_id": "match_id", "commence_time": "kickoff_time"})
+    events["date"] = events["kickoff_dt"].dt.strftime("%Y-%m-%d")
+    events["league"] = events["sport"].fillna("unknown") if "sport" in events.columns else "unknown"
+    events["sport"] = events["league"].map(SPORT_MAP).fillna("soccer")
+
+    return events.drop(columns=["kickoff_dt"], errors="ignore").reset_index(drop=True)
+
+
+def _normalize_odds_for_predict(odds_df) -> list:
+    """Convert OddsAPISource DataFrame to the format expected by get_platform_odds().
+
+    Renames: event_id→match_id, price→odds, bookmaker_key→bookmaker
+    Maps markets: h2h→1x2_*, totals→over_N/under_N
+    """
+    if odds_df is None or (hasattr(odds_df, "empty") and odds_df.empty):
+        return []
+
+    result = []
+    for _, row in odds_df.iterrows():
+        raw_market = str(row.get("market", "")).lower()
+        outcome_lower = str(row.get("outcome_name", "")).lower()
+        home_lower = str(row.get("home_team", "")).lower()
+        away_lower = str(row.get("away_team", "")).lower()
+        price = row.get("price")
+        event_id = str(row.get("event_id", ""))
+        bookmaker = str(row.get("bookmaker_key") or row.get("bookmaker_name") or "")
+
+        if not price or float(price) <= 1.0 or not event_id:
+            continue
+
+        internal_market = None
+        if raw_market == "h2h":
+            if "draw" in outcome_lower:
+                internal_market = "1x2_draw"
+            else:
+                home_words = set(home_lower.split())
+                away_words = set(away_lower.split())
+                out_words = set(outcome_lower.split())
+                home_match = len(home_words & out_words)
+                away_match = len(away_words & out_words)
+                internal_market = "1x2_home" if home_match >= away_match else "1x2_away"
+        elif raw_market == "totals":
+            point = row.get("point")
+            if point is not None:
+                if "over" in outcome_lower:
+                    internal_market = f"over_{point}"
+                elif "under" in outcome_lower:
+                    internal_market = f"under_{point}"
+
+        if internal_market and event_id:
+            result.append({
+                "match_id": event_id,
+                "market": internal_market,
+                "bookmaker": bookmaker,
+                "odds": float(price),
+                "home_team": str(row.get("home_team", "")),
+                "away_team": str(row.get("away_team", "")),
+            })
+
+    return result
+
+
+def _get_today_match_markets(db) -> set:
+    """Return set of (match_id, market) pairs already bet today."""
+    try:
+        with db._get_conn() as conn:
+            rows = conn.execute(
+                "SELECT match_id, market FROM bets WHERE match_date = date('now')"
+            ).fetchall()
+            return {(str(r[0]), str(r[1])) for r in rows}
+    except Exception:
+        return set()
 
 
 def cmd_setup(config: dict):
@@ -117,7 +356,16 @@ def cmd_collect(config: dict):
 
 
 def cmd_predict(config: dict):
-    """Run prediction engine and store daily bets."""
+    """Run prediction engine and store daily bets.
+
+    Automatically detects the active scheduling window (morning / midday /
+    afternoon) and only generates bets for matches kicking off within that
+    window's time range.  The global max_daily_bets cap is shared across all
+    three daily runs: each run checks how many bets already exist today and
+    reduces its budget accordingly.
+    """
+    import pandas as pd
+    from typing import Optional
     from tracking.database import DatabaseHandler
     from data.collector import DataCollector
     from features.builder import FeatureBuilder
@@ -132,7 +380,32 @@ def cmd_predict(config: dict):
     from steering.ampel import calculate_ampel, AmpelMetrics
 
     db = DatabaseHandler()
-    collector = DataCollector(config, db)
+
+    # ── Window detection ──────────────────────────────────────────────────────
+    predict_window, kickoff_from_dt, kickoff_to_dt = _detect_predict_window(config)
+
+    # ── Global daily budget ───────────────────────────────────────────────────
+    max_daily = config.get("betting", {}).get("max_daily_bets", 25)
+    bets_already_today = _count_bets_today(db)
+    window_budget = max_daily - bets_already_today
+    if window_budget <= 0:
+        logger.info(
+            f"Daily bet budget exhausted ({bets_already_today}/{max_daily}). "
+            f"Skipping predict for window='{predict_window}'."
+        )
+        print(f"ℹ️  Daily budget full ({bets_already_today}/{max_daily} bets). "
+              f"No new bets for window '{predict_window}'.")
+        return []
+    logger.info(
+        f"Window '{predict_window}': budget {window_budget} of {max_daily} "
+        f"(already have {bets_already_today} today)"
+    )
+
+    # Temporarily override max_daily_bets in config for this window's run
+    # so select_daily_bets caps correctly at the remaining budget.
+    window_config = {**config, "betting": {**config.get("betting", {}), "max_daily_bets": window_budget}}
+
+    collector = DataCollector(window_config, db)
 
     # Initialize models
     poisson = PoissonModel()
@@ -145,12 +418,23 @@ def cmd_predict(config: dict):
 
     # Fit on historical match data if available
     collection = collector.collect_all()
-    matches_df = getattr(collection, "matches", None)
 
-    if matches_df is not None and not matches_df.empty:
-        logger.info("Fitting Poisson and ELO models...")
+    # --- FIX: CollectionResult stores data in .data dict, not as attributes ---
+    football_df = collection.data.get("football_matches")
+
+    # Historical matches for model fitting: finished football matches only
+    matches_df: Optional[pd.DataFrame] = None
+    if football_df is not None and not football_df.empty:
+        finished_mask = football_df["status"].isin({"FINISHED"}) if "status" in football_df.columns else pd.Series(True, index=football_df.index)
+        finished = football_df[finished_mask]
+        matches_df = finished if not finished.empty else None
+
+    if matches_df is not None:
+        logger.info(f"Fitting Poisson and ELO models on {len(matches_df)} historical matches...")
         poisson.fit(matches_df)
         elo.fit(matches_df)
+    else:
+        logger.warning("No finished football matches available — models not fitted")
 
     ensemble = EnsembleModel(poisson, xgboost, elo, config)
     feature_builder = FeatureBuilder(db, config)
@@ -215,16 +499,41 @@ def cmd_predict(config: dict):
 
     bankroll = tracker.get_current_bankroll()
 
-    # Get upcoming matches
-    upcoming = getattr(collection, "upcoming", None)
-    if upcoming is None or (hasattr(upcoming, "empty") and upcoming.empty):
-        logger.warning("No upcoming matches found")
-        print("No upcoming matches to predict")
+    # Build upcoming matches from Odds API data — this is the ONLY source where
+    # match_ids are consistent with the odds lookup below (both use event_id).
+    # Using football/hockey APIs for upcoming would cause match_id mismatches.
+    odds_df = collection.data.get("odds")
+    upcoming = _extract_upcoming_from_odds(odds_df)
+
+    if upcoming is None or upcoming.empty:
+        logger.warning("No upcoming matches found in Odds API data (1-36h window)")
+        print("No upcoming matches to predict — check ODDS_API_KEY and API quota")
+        return []
+
+    logger.info(f"Upcoming matches from Odds API: {len(upcoming)} (pre-window filter)")
+
+    # ── Window filter: keep only matches kicking off inside this window's range ──
+    if "kickoff_time" in upcoming.columns:
+        mask = upcoming["kickoff_time"].apply(
+            lambda kt: _kickoff_in_window(kt, kickoff_from_dt, kickoff_to_dt)
+        )
+        upcoming = upcoming[mask]
+        logger.info(
+            f"After window filter ('{predict_window}'): {len(upcoming)} matches "
+            f"kickoff {kickoff_from_dt.strftime('%H:%M')}–{kickoff_to_dt.strftime('%H:%M')}"
+        )
+
+    if upcoming.empty:
+        logger.info(f"No matches in window '{predict_window}' — nothing to predict")
+        print(f"ℹ️  No matches in window '{predict_window}'.")
         return []
 
     # Generate predictions
     predictions = []
-    odds_data = getattr(collection, "odds", []) or []
+
+    # Normalize odds to internal format: match_id, market, bookmaker, odds
+    # This maps: h2h→1x2_*/draw, totals→over_N/under_N, event_id→match_id
+    odds_data = _normalize_odds_for_predict(odds_df)
 
     for _, match in (upcoming.iterrows() if hasattr(upcoming, "iterrows") else []):
         match_dict = dict(match)
@@ -239,11 +548,11 @@ def cmd_predict(config: dict):
             features = feature_builder.build_match_features(
                 match_dict,
                 historical_matches=matches_df,
-                xg_data=getattr(collection, "xg", None),
-                injury_data=getattr(collection, "injuries", None),
-                market_values=getattr(collection, "squad_values", None),
-                team_schedule=getattr(collection, "schedules", None),
-                news_sentiment=getattr(collection, "news", {}).get(f"{home}_{away}"),
+                xg_data=collection.data.get("xg"),
+                injury_data=collection.data.get("injuries"),
+                market_values=collection.data.get("squad_values"),
+                team_schedule=collection.data.get("schedules"),
+                news_sentiment=(collection.data.get("news") or pd.DataFrame()).to_dict(orient="records") if hasattr(collection.data.get("news"), "to_dict") else {},
             )
 
             sport = match_dict.get("sport", "soccer")
@@ -272,6 +581,9 @@ def cmd_predict(config: dict):
                 # unreliable in practice: odds move, accounts get limited, and
                 # mixing platforms makes CLV tracking meaningless.
                 platform_odds, bookmaker = get_platform_odds(match_id, market, odds_data, primary_bookmaker)
+                # Fallback: use best available bookmaker when primary has no line
+                if platform_odds < min_odds:
+                    platform_odds, bookmaker = find_best_odds(match_id, market, odds_data)
                 if platform_odds < min_odds:
                     continue
 
@@ -303,6 +615,7 @@ def cmd_predict(config: dict):
                     "stake_recommended": stake,
                     "kelly_fraction": kelly_frac,
                     "kickoff_time": match_dict.get("kickoff_time"),
+                    "predict_window": predict_window,  # tag which window generated this bet
                 }
                 predictions.append(bet_dict)
 
@@ -311,23 +624,32 @@ def cmd_predict(config: dict):
             continue
 
     # Apply selection filter (Ampel parameters override config thresholds downward)
+    # Use window_config so max_daily_bets is capped to remaining budget.
     week_watchable = _get_week_watchable_count(db)
-    selected = select_daily_bets(predictions, config, week_watchable, ampel_params=ampel_params)
+    selected = select_daily_bets(predictions, window_config, week_watchable, ampel_params=ampel_params)
 
-    # Store in DB
+    # Store in DB — exclude non-DB fields, but keep predict_window for tracking
     for bet in selected:
         bet_copy = {k: v for k, v in bet.items() if k not in ("kickoff_time",)}
         db.insert_bet(bet_copy)
 
-    logger.info(f"Generated {len(selected)} bets from {len(predictions)} candidates")
-    print(f"✅ {len(selected)} bets generated (from {len(predictions)} candidates with positive EV)")
+    logger.info(
+        f"Window '{predict_window}': generated {len(selected)} bets "
+        f"from {len(predictions)} candidates (budget was {window_budget})"
+    )
+    print(
+        f"✅ {len(selected)} bets generated for window '{predict_window}' "
+        f"(from {len(predictions)} candidates with positive EV)"
+    )
 
-    if len(selected) == 0:
-        logger.warning("0 bets generated today — sending Telegram alert")
+    # Only alert on 0 bets for the morning window — midday/afternoon windows
+    # may legitimately have no qualifying matches.
+    if len(selected) == 0 and predict_window == "morning":
+        logger.warning("0 bets generated in morning window — sending Telegram alert")
         try:
             from notifications.telegram_bot import TelegramBotHandler
             bot = TelegramBotHandler(config, db)
-            bot.send_message_sync("⚠️ 0 Bets heute generiert — prüfe Daten & Modell")
+            bot.send_message_sync("⚠️ 0 Bets im Morning Window — prüfe Daten & Modell")
         except Exception as _tg_err:
             logger.error(f"Failed to send zero-bets alert: {_tg_err}")
 
@@ -349,7 +671,17 @@ def _get_week_watchable_count(db) -> int:
 
 
 def cmd_brief(config: dict):
-    """Send morning briefing via Telegram."""
+    """Send a betting brief via Telegram — only bets not yet included in a prior brief.
+
+    Each call to --brief sends only the bets generated since the last brief
+    (those with brief_sent_at IS NULL).  After a successful Telegram send the
+    sent bets are stamped with brief_sent_at = now so subsequent brief windows
+    never repeat them.
+
+    This replaces the old pattern of fetching ALL pending bets regardless of
+    whether they were already sent.  It is safe to call --brief multiple times
+    per day — the second call on an empty queue simply sends nothing.
+    """
     from tracking.database import DatabaseHandler
     from tracking.performance import PerformanceTracker
     from notifications.morning_briefing import format_morning_briefing
@@ -357,7 +689,15 @@ def cmd_brief(config: dict):
 
     db = DatabaseHandler()
     tracker = PerformanceTracker(db, config)
-    bets = db.get_pending_bets(date.today())
+
+    # Only bets that have not been included in any prior brief today
+    bets = db.get_unbriefed_bets(date.today())
+
+    if not bets:
+        logger.info("--brief: no new (unbriefed) bets to send")
+        print("ℹ️  No new bets to send in this brief window.")
+        return True  # Not an error — window just had no qualifying matches
+
     perf = tracker.get_full_summary()
     perf["starting_bankroll"] = config.get("betting", {}).get("bankroll_paper", 1000.0)
 
@@ -366,9 +706,12 @@ def cmd_brief(config: dict):
     success = bot.send_message_sync(message)
 
     if success:
-        print("✅ Morning briefing sent")
+        # Stamp all sent bets so they are never re-sent in a later window
+        bet_ids = [b["id"] for b in bets if b.get("id")]
+        db.mark_bets_as_briefed(bet_ids)
+        print(f"✅ Brief sent ({len(bets)} new bet(s) stamped as briefed)")
     else:
-        print("❌ Failed to send morning briefing")
+        print("❌ Failed to send brief — bets NOT stamped (will retry next window)")
     return success
 
 
@@ -697,11 +1040,12 @@ def cmd_goalie_check(config: dict):
         if not match_id:
             continue
         try:
-            status = source.get_goalie_status(match_id)
+            # get_goalie_status(team, match_id) — pass home_team as the team arg
+            status = source.get_goalie_status(bet.get("home_team", ""), match_id)
             if not status:
                 logger.debug(f"goalie_check: no status for match {match_id}")
                 continue
-            current = status.get("home_goalie") or status.get("starting_goalie", "")
+            current = status.get("goalie_name", "")
             recorded = bet.get("notes", "")  # goalie stored in notes if available
             if current and recorded and current.lower() != recorded.lower():
                 msg = (
