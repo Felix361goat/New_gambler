@@ -42,7 +42,7 @@ class FeatureBuilder:
         elif sport == "hockey":
             return self._build_hockey_features(match, historical_matches)
         elif sport == "basketball":
-            return self._build_basketball_features(match, historical_matches)
+            return self._build_basketball_features(match, historical_matches, injury_data)
         # else: fall through to soccer logic below
 
         features = {}
@@ -244,7 +244,7 @@ class FeatureBuilder:
             logger.warning(f"Hockey features failed: {e}")
             return {"sport": "hockey", "_available_groups": [], "_imputed_groups": ["hockey_schedule"]}
 
-    def _build_basketball_features(self, match: dict, matches_df) -> dict:
+    def _build_basketball_features(self, match: dict, matches_df, injury_data=None) -> dict:
         """
         Build features for lower-tier basketball (Baltic/Romanian/European minor).
         Key signals: player impact score, key player availability, roster size.
@@ -256,7 +256,7 @@ class FeatureBuilder:
             source = BasketballLowerSource(self.config)
             home = match.get("home_team", "")
             away = match.get("away_team", "")
-            injury_data = match.get("injury_data", [])
+            injury_data = injury_data or []
             roster = match.get("roster", {})
             home_impact = source.calculate_player_impact(home, injury_data, roster)
             away_impact = source.calculate_player_impact(away, injury_data, roster)

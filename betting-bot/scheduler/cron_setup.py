@@ -64,30 +64,26 @@ def install_cron_jobs(main_script: Path):
     except Exception:
         current = ""
 
-    lines = current.splitlines()
-    added = 0
+    # Strip all existing betting-bot entries so re-runs are always idempotent.
+    # Substring matching is fragile when Python path changes (e.g. venv upgrade);
+    # a full replace-and-rewrite is simpler and guarantees no duplicates.
+    lines = [l for l in current.splitlines() if "# betting-bot:" not in l]
 
+    # Build new job lines with quoted paths to handle spaces in paths/executables
+    new_jobs = []
     for schedule, arg, comment in CRON_JOBS:
-        job_line = f"{schedule} {python} {main_path} {arg}  # betting-bot: {comment}"
-        # Match on the full job_line (schedule + script + arg) to allow multiple
-        # predict/collect/brief entries with different schedules to coexist
-        if any(job_line.split("  #")[0] in line for line in lines):
-            logger.info(f"Cron job already exists: {schedule} {arg}")
-            continue
+        job_line = f'{schedule} "{python}" "{main_path}" {arg}  # betting-bot: {comment}'
         lines.append(job_line)
-        added += 1
+        new_jobs.append(job_line)
 
-    if added > 0:
-        new_crontab = "\n".join(lines) + "\n"
-        proc = subprocess.run(["crontab", "-"], input=new_crontab, text=True, capture_output=True)
-        if proc.returncode == 0:
-            logger.info(f"Installed {added} new cron jobs")
-            print(f"✅ Installed {added} cron jobs")
-        else:
-            logger.error(f"crontab install failed: {proc.stderr}")
-            print(f"❌ crontab install failed: {proc.stderr}")
+    new_crontab = "\n".join(lines) + "\n"
+    proc = subprocess.run(["crontab", "-"], input=new_crontab, text=True, capture_output=True)
+    if proc.returncode == 0:
+        logger.info(f"Installed/refreshed {len(new_jobs)} cron jobs")
+        print(f"✅ Installed {len(new_jobs)} cron jobs")
     else:
-        print("✅ All cron jobs already installed")
+        logger.error(f"crontab install failed: {proc.stderr}")
+        print(f"❌ crontab install failed: {proc.stderr}")
 
     return added
 
