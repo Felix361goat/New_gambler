@@ -421,6 +421,11 @@ def cmd_predict(config: dict):
     if not xgboost.load():
         logger.info("No pre-trained XGBoost found — using Poisson + ELO only")
 
+    # Load persisted ELO ratings — ratings accumulate across runs so we never
+    # lose history between daily predict windows.
+    elo_path = str(ROOT / "data" / "elo_ratings.pkl")
+    elo.load(elo_path)
+
     # Fit on historical match data if available
     collection = collector.collect_all()
 
@@ -438,6 +443,8 @@ def cmd_predict(config: dict):
         logger.info(f"Fitting Poisson and ELO models on {len(matches_df)} historical matches...")
         poisson.fit(matches_df)
         elo.fit(matches_df)
+        # Persist updated ELO ratings so history accumulates across runs
+        elo.save(elo_path)
     else:
         logger.warning("No finished football matches available — models not fitted")
 

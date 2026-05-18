@@ -36,7 +36,11 @@ class TelegramBotHandler:
         try:
             from telegram import Bot
             bot = Bot(token=self.bot_token)
-            await bot.send_message(chat_id=self.chat_id, text=text, parse_mode="HTML")
+            # Telegram hard-limit: 4096 chars per message — split if needed
+            max_len = 4096
+            parts = [text[i:i + max_len] for i in range(0, len(text), max_len)]
+            for part in parts:
+                await bot.send_message(chat_id=self.chat_id, text=part, parse_mode="HTML")
             return True
         except Exception as e:
             logger.error(f"send_message failed: {e}")
@@ -132,7 +136,7 @@ class TelegramBotHandler:
                 f"📊 <b>Status</b>\n"
                 f"💰 Bankroll: €{summary['bankroll']:.2f}\n"
                 f"📈 ROI: {summary['roi']:+.1f}%\n"
-                f"📋 Settled Bets: {summary['settled_bets']}/200\n"
+                f"📋 Settled Bets: {summary['settled_bets']}/{self.config.get('betting', {}).get('min_paper_bets_before_live', 500)}\n"
                 f"✅ Won: {summary['won']} | ❌ Lost: {summary['lost']}\n"
                 f"🎯 Ready for Live: {'YES ✅' if summary['ready_for_live'] else 'NO'}"
             )
@@ -149,7 +153,7 @@ class TelegramBotHandler:
             bets = self.db.get_pending_bets(date.today())
             perf = tracker.get_full_summary()
             msg = format_morning_briefing(bets, perf)
-            await update.message.reply_text(msg)
+            await update.message.reply_text(msg, parse_mode="HTML")
         except Exception as e:
             logger.error(f"_cmd_bets failed: {e}")
             await update.message.reply_text(f"❌ Fehler: {e}")
@@ -161,7 +165,7 @@ class TelegramBotHandler:
             tracker = PerformanceTracker(self.db, self.config)
             perf = tracker.get_full_summary()
             msg = format_weekly_report(perf)
-            await update.message.reply_text(msg)
+            await update.message.reply_text(msg, parse_mode="HTML")
         except Exception as e:
             logger.error(f"_cmd_week failed: {e}")
             await update.message.reply_text(f"❌ Fehler: {e}")

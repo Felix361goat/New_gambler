@@ -248,6 +248,42 @@ class EloModel:
         }
 
     # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save(self, path: str = "data/elo_ratings.pkl") -> bool:
+        """Persist ratings to disk so they survive between predict runs."""
+        import pickle
+        from pathlib import Path
+        try:
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "wb") as f:
+                pickle.dump({"ratings": self.ratings, "tennis_ratings": self.tennis_ratings}, f)
+            logger.info(f"ELO ratings saved: {len(self.ratings)} teams → {path}")
+            return True
+        except Exception as e:
+            logger.error(f"ELO save failed: {e}")
+            return False
+
+    def load(self, path: str = "data/elo_ratings.pkl") -> bool:
+        """Load ratings from disk if available."""
+        import pickle
+        from pathlib import Path
+        if not Path(path).exists():
+            logger.info(f"No ELO checkpoint found at {path} — starting fresh")
+            return False
+        try:
+            with open(path, "rb") as f:
+                data = pickle.load(f)
+            self.ratings = data.get("ratings", {})
+            self.tennis_ratings = data.get("tennis_ratings", {})
+            logger.info(f"ELO ratings loaded: {len(self.ratings)} teams from {path}")
+            return True
+        except Exception as e:
+            logger.error(f"ELO load failed: {e}")
+            return False
+
+    # ------------------------------------------------------------------
     # Fitting from historical data
     # ------------------------------------------------------------------
 

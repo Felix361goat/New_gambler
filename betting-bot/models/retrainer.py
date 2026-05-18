@@ -204,13 +204,34 @@ class ModelRetrainer:
     def _update_elo(self, training_data) -> dict:
         if not hasattr(self.ensemble, "elo"):
             return {"success": False}
-        settled = training_data[training_data.get("status", pd.Series(["placed"])) == "placed"] if "status" in training_data.columns else training_data
+
+        # Must use match-level data (home_goals/away_goals) — not bet rows.
+        # Bet rows have market/ev_score but no score columns, so every update
+        # would silently treat the result as a 0-0 draw.
+        try:
+            match_df = self.db.get_match_features_for_retraining()
+        except Exception:
+            match_df = None
+
+        if match_df is None or match_df.empty:
+            return {"success": False, "reason": "no match data for ELO update"}
+
+        required_cols = {"home_team", "away_team", "home_goals", "away_goals"}
+        if not required_cols.issubset(set(match_df.columns)):
+            return {"success": False, "reason": f"missing columns: {required_cols - set(match_df.columns)}"}
+
+        match_rows = match_df.dropna(subset=["home_goals", "away_goals"])
+        if "date" in match_rows.columns:
+            match_rows = match_rows.sort_values("date")
+
         count = 0
-        for _, row in training_data.iterrows():
+        for _, row in match_rows.iterrows():
             if row.get("home_team") and row.get("away_team"):
                 try:
-                    self.ensemble.elo.update_ratings(dict(row))
+                    sport = row.get("sport", "soccer")
+                    self.ensemble.elo.update_ratings(dict(row), sport=sport)
                     count += 1
                 except Exception:
                     pass
+
         return {"success": True, "updated": count}
