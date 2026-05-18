@@ -31,8 +31,8 @@ def format_morning_briefing(bets: list, performance: dict) -> str:
         bookmaker = bet.get("bookmaker_name", "?")
         ev = bet.get("ev_score", 0) * 100
         confidence = bet.get("confidence_score", 0)
-        stake = bet.get("stake_recommended", 0)
-        bankroll = performance.get("bankroll", 1000)
+        stake = bet.get("stake_recommended") or 0
+        bankroll = performance.get("bankroll") or 1000
         stake_pct = (stake / bankroll * 100) if bankroll > 0 else 0
         total_ev += ev
 
