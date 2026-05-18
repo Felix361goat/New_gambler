@@ -30,33 +30,34 @@ from __future__ import annotations
 LEAGUE_TIER_MAP: dict[str, int] = {
     # ── TIER 1 ── Premium Data ───────────────────────────────────────────────
     # Hockey
-    "hockey_ahl": 1,           # AHL: EliteProspects + 3 Stats-Portale, 5+ Jahre
+    "icehockey_ahl": 1,           # AHL: EliteProspects + 3 Stats-Portale, 5+ Jahre
     # Tennis
-    "tennis_wta": 1,           # WTA: Tennis Abstract (Sackmann), 10+ Jahre, 15+ Bookies
-    "tennis_atp": 1,           # ATP Top 50: idem
+    "tennis_wta": 1,              # WTA: Tennis Abstract (Sackmann), 10+ Jahre, 15+ Bookies
+    "tennis_atp": 1,              # ATP Top 50: idem
     # Basketball
-    "basketball_baltic": 1,    # Baltic (Estl/Lettl/Lith): Realscore, Flashscore, 3 Bookies
+    "basketball_euroleague": 1,   # EuroLeague / Baltic: Realscore, Flashscore, 3 Bookies
     # Soccer
-    "soccer_england_tier4": 1, # National League EN: Opta, Understat, 8+ Bookies
-    "soccer_scandinavia": 1,   # Allsvenskan/Eliteserien: Solidsport-Daten, 5+ Bookies
+    "soccer_england_league1": 1,  # League One EN: Opta, Understat, 8+ Bookies
+    "soccer_scandinavia": 1,      # Allsvenskan/Eliteserien: Solidsport-Daten, 5+ Bookies
 
     # ── TIER 2 ── Standard Data ──────────────────────────────────────────────
     # Hockey
-    "hockey_echl": 2,          # ECHL: EliteProspects, 3 Quellen, ~2 Jahre
-    "hockey_european_minor": 2, # EBEL, DEL2, NLA: 3 Quellen, 2 Jahre
+    "hockey_echl": 2,             # ECHL: EliteProspects, 3 Quellen, ~2 Jahre
+    "hockey_european_minor": 2,   # EBEL, DEL2, NLA: 3 Quellen, 2 Jahre
     # Tennis
-    "tennis_itf_women": 2,     # ITF Damen: Tennis Abstract, 3 Quellen, ~2 Jahre
+    "tennis_itf_women": 2,        # ITF Damen: Tennis Abstract, 3 Quellen, ~2 Jahre
     # Basketball
-    "basketball_romanian": 2,  # Romania Liga: SofaScore + 2 Quellen, 2 Jahre
+    "basketball_romanian": 2,     # Romania Liga: SofaScore + 2 Quellen, 2 Jahre
     "basketball_european_lower": 2,  # BSL, Rumänien 2 etc.: 3 Quellen, 1.5 Jahre
     # Soccer
-    "soccer_poland": 2,        # Ekstraklasa: Opta light, 4 Bookies, 2 Jahre
+    "soccer_poland_ekstraklasa": 2,  # Ekstraklasa: Opta light, 4 Bookies, 2 Jahre
+    "soccer_austria_bundesliga": 2,  # Österreich BL: 3 Quellen, 2 Jahre
 
     # ── TIER 3 ── Low Data (nur Paper Mode) ──────────────────────────────────
-    "tennis_itf_men": 3,       # ITF Herren lower: <3 Bookies, viele unbekannte Spieler
-    "soccer_england_tier5": 3, # National League South/North: <4 Bookies, Match-Fixing-Flag
+    "tennis_itf_men": 3,          # ITF Herren lower: <3 Bookies, viele unbekannte Spieler
+    "soccer_england_tier5": 3,    # National League South/North: <4 Bookies, Match-Fixing-Flag
     "basketball_unknown_region": 3,  # Catch-all
-    "hockey_tier3_plus": 3,    # Jede Liga unterhalb ECHL/DEL2
+    "hockey_tier3_plus": 3,       # Jede Liga unterhalb ECHL/DEL2
     # Alles andere → Tier 3 (siehe assign_tier())
 }
 

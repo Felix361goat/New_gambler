@@ -52,9 +52,8 @@ def calculate_team_form(team_id: str, matches_df: pd.DataFrame, weights_config: 
 
     last5 = all_points[:5]
     last10_20 = all_points[10:20]
-    full_season = all_points
-    # 2-3 seasons = use all available (proxy)
-    last_seasons = all_points
+    full_season = all_points[:20]   # current season proxy: most recent ~20 games
+    last_seasons = all_points[20:]  # older seasons proxy: everything beyond 20 games
 
     w = weights_config if weights_config else {
         "last_5_games": 0.35,
@@ -64,13 +63,24 @@ def calculate_team_form(team_id: str, matches_df: pd.DataFrame, weights_config: 
         "head_to_head": 0.10,
     }
 
+    # Only sum weights of components that have data; H2H weight (0.10) is applied
+    # externally in h2h.py — exclude it here so the score stays in [0, 100].
+    used_weights = (
+        w.get("last_5_games", 0.35)
+        + w.get("last_10_to_20_games", 0.25)
+        + (w.get("full_current_season", 0.15) if full_season else 0.0)
+        + (w.get("last_2_to_3_seasons", 0.15) if last_seasons else 0.0)
+    )
+    if used_weights <= 0:
+        used_weights = 1.0
+
     weighted_ppg = (
         ppg(last5) * w.get("last_5_games", 0.35)
         + ppg(last10_20) * w.get("last_10_to_20_games", 0.25)
         + ppg(full_season) * w.get("full_current_season", 0.15)
         + ppg(last_seasons) * w.get("last_2_to_3_seasons", 0.15)
     )
-    weighted_form_score = (weighted_ppg / 3.0) * 100
+    weighted_form_score = (weighted_ppg / (3.0 * used_weights)) * 100
 
     scored = [g[0] for g in all_goals]
     conceded = [g[1] for g in all_goals]

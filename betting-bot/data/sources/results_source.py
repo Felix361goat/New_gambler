@@ -187,13 +187,19 @@ class ResultsSource:
     # Closing-line value helpers
     # ------------------------------------------------------------------
 
-    def _get_closing_odds(self, db, match_id: str, market: str) -> float:
+    def _get_closing_odds(
+        self,
+        db,
+        match_id: str,
+        market: str,
+        match_date: str | None = None,
+        bookmaker: str | None = None,
+    ) -> float:
         """Return the most recent pre-match closing odds for a given match/market.
 
-        Queries the odds_snapshots table for the last snapshot captured before
-        the match started.  We use MAX(odds_home) as a proxy for the best
-        available closing price; for over/under markets we use odds_over /
-        odds_under instead.
+        Filters snapshots to those captured on or before match_date (end of day)
+        to avoid using post-kickoff odds for CLV.  Optionally filters by the same
+        bookmaker used for the bet so we compare apples-to-apples.
 
         Returns 0.0 if no snapshot exists (caller keeps clv_score = 0.0).
         """
@@ -211,14 +217,27 @@ class ResultsSource:
             else:
                 col = "odds_home"
 
+            params: list = [str(match_id), market]
+            date_clause = ""
+            if match_date:
+                date_clause = "AND captured_at <= ?"
+                params.append(f"{match_date} 23:59:59")
+
+            bookmaker_clause = ""
+            if bookmaker:
+                bookmaker_clause = "AND bookmaker = ?"
+                params.append(bookmaker)
+
             with db._get_conn() as conn:
                 row = conn.execute(
                     f"""
                     SELECT {col} FROM odds_snapshots
                     WHERE match_id = ? AND market = ?
+                    {date_clause}
+                    {bookmaker_clause}
                     ORDER BY captured_at DESC LIMIT 1
                     """,
-                    (str(match_id), market),
+                    params,
                 ).fetchone()
             val = row[0] if row else None
             if val is None:
@@ -298,7 +317,11 @@ class ResultsSource:
         odds = bet.get("bookmaker_odds") or 0.0
         pnl = stake * (odds - 1) if won else -stake
 
-        closing_odds = self._get_closing_odds(db, match_id, market)
+        closing_odds = self._get_closing_odds(
+            db, match_id, market,
+            match_date=bet.get("match_date"),
+            bookmaker=bet.get("bookmaker_name"),
+        )
         if closing_odds <= 0.0:
             logger.warning(
                 f"Bet {bet['id']}: no closing odds for match {match_id}/{market} — CLV set to 0.0"
@@ -424,7 +447,11 @@ class ResultsSource:
         pnl = stake * (odds - 1) if won else -stake
 
         match_id = bet.get("match_id", "")
-        closing_odds = self._get_closing_odds(db, match_id, market)
+        closing_odds = self._get_closing_odds(
+            db, match_id, market,
+            match_date=bet.get("match_date"),
+            bookmaker=bet.get("bookmaker_name"),
+        )
         if closing_odds <= 0.0:
             logger.warning(
                 f"Bet {bet['id']}: no closing odds for match {match_id}/{market} — CLV set to 0.0"

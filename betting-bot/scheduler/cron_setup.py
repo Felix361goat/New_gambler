@@ -30,6 +30,7 @@ CRON_JOBS = [
 
     # ── Fixed daily jobs ──────────────────────────────────────────────────────
     ("0 */6 * * *",  "--odds_snapshot", "Save odds snapshot every 6h"),
+    ("0 8 * * *",    "--odds_snapshot", "Capture closing odds before morning matches"),
     ("30 18 * * *",  "--goalie_check",  "Check goalie status 90min pre-game"),
     ("0 23 * * *",   "--summarize",     "Send evening summary"),
     ("0 10 * * *",   "--results",       "Settle yesterday's results"),
@@ -85,7 +86,7 @@ def install_cron_jobs(main_script: Path):
         logger.error(f"crontab install failed: {proc.stderr}")
         print(f"❌ crontab install failed: {proc.stderr}")
 
-    return added
+    return len(new_jobs)
 
 
 def show_cron_jobs():

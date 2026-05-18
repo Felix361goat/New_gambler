@@ -30,16 +30,17 @@ sports:
     - tennis_wta
     - tennis_itf_women
     - tennis_itf_men
-    - hockey_ahl
+    - icehockey_ahl
     - hockey_echl
     - hockey_european_minor
-    - basketball_baltic
+    - basketball_euroleague
     - basketball_romanian
     - basketball_european_lower
-    - soccer_england_tier4
+    - soccer_england_league1
     - soccer_england_tier5
     - soccer_scandinavia
-    - soccer_poland
+    - soccer_poland_ekstraklasa
+    - soccer_austria_bundesliga
   disabled:                        # High-coverage markets — bookies have edge here
     - premier_league
     - bundesliga
@@ -59,13 +60,14 @@ sports:
     tennis_wta: 20
     tennis_itf_women: 15
     tennis_itf_men: 15
-    hockey_ahl: 15
+    icehockey_ahl: 15
     hockey_echl: 10
-    basketball_baltic: 12
+    basketball_euroleague: 12
     basketball_romanian: 10
-    soccer_england_tier4: 20
+    soccer_england_league1: 20
     soccer_scandinavia: 15
-    soccer_poland: 15
+    soccer_poland_ekstraklasa: 15
+    soccer_austria_bundesliga: 15
 
   confidence_tiers:
     high_min_data_pct: 0.80        # ≥80% features available → High
@@ -74,7 +76,7 @@ sports:
 
   matchfixing_risk_flags:
     flag_leagues:
-      - soccer_poland               # Flag but don't exclude — check per game
+      - soccer_poland_ekstraklasa   # Flag but don't exclude — check per game
       - soccer_england_tier5
     exclude_leagues:
       - table_tennis
@@ -100,11 +102,11 @@ sports:
       min_bookmakers: 8
       min_sample_size: 20
       leagues:                     # Explizite Tier-1-Zuordnung
-        - hockey_ahl
+        - icehockey_ahl
         - tennis_wta
         - tennis_atp
-        - basketball_baltic
-        - soccer_england_tier4
+        - basketball_euroleague
+        - soccer_england_league1
         - soccer_scandinavia
     tier2:
       min_sources: 3
@@ -117,7 +119,8 @@ sports:
         - tennis_itf_women
         - basketball_romanian
         - basketball_european_lower
-        - soccer_poland
+        - soccer_poland_ekstraklasa
+        - soccer_austria_bundesliga
     tier3_paper_only:              # Diese Ligen werden im Live Mode ignoriert
       leagues:
         - tennis_itf_men
@@ -129,11 +132,12 @@ leagues:
   priority:
     - tennis_wta
     - tennis_itf_men
-    - hockey_ahl
-    - basketball_baltic
-    - soccer_england_tier4
+    - icehockey_ahl
+    - basketball_euroleague
+    - soccer_england_league1
     - soccer_scandinavia
-    - soccer_poland
+    - soccer_poland_ekstraklasa
+    - soccer_austria_bundesliga
     - hockey_echl
     - hockey_european_minor
     - basketball_romanian
@@ -142,8 +146,8 @@ leagues:
     - tennis_itf_women
   watchable_preferred:
     - tennis_wta
-    - hockey_ahl
-    - basketball_baltic
+    - icehockey_ahl
+    - basketball_euroleague
   watchable_max_per_week: 3
   watchable_min_per_week: 1
   watchable_kickoff_window:
