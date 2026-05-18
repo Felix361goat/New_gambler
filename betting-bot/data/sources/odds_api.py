@@ -16,12 +16,16 @@ from .base_source import BaseSource
 SUPPORTED_SPORTS = [
     "tennis_wta",
     "icehockey_ahl",
-    "icehockey_nhl",
+    # icehockey_nhl removed — NHL is one of the most efficiently priced leagues
+    # in North America; finding 5%+ EV is near-impossible and config lists it
+    # as disabled. Saves 2 API calls/day for the free-tier budget.
     "basketball_euroleague",
     "soccer_england_league1",
     "soccer_austria_bundesliga",
     "soccer_poland_ekstraklasa",
-    "soccer_france_ligue_one",
+    # soccer_france_ligue_one removed — config.yaml explicitly lists ligue_1
+    # under sports.disabled ("High-coverage markets — bookies have edge here").
+    # 6 keys × 2 collects × 31 days = 372 req/month (well within 500 free).
 ]
 
 DEFAULT_REGIONS = "eu,uk,us"

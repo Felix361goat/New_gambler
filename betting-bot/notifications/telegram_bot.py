@@ -43,17 +43,23 @@ class TelegramBotHandler:
             return False
 
     def send_message_sync(self, text: str) -> bool:
-        """Synchronous wrapper for send_message."""
+        """Synchronous wrapper — safe for cron/non-async contexts (Python 3.10+)."""
         import asyncio
         try:
-            loop = asyncio.get_event_loop()
-            if loop.is_running():
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+
+            if loop and loop.is_running():
+                # Called from inside an already-running event loop (e.g. tests)
                 import concurrent.futures
                 with concurrent.futures.ThreadPoolExecutor() as pool:
                     future = pool.submit(asyncio.run, self.send_message(text))
                     return future.result(timeout=30)
             else:
-                return loop.run_until_complete(self.send_message(text))
+                # Normal cron context — create a fresh loop
+                return asyncio.run(self.send_message(text))
         except Exception as e:
             logger.error(f"send_message_sync failed: {e}")
             return False

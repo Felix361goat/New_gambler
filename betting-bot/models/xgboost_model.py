@@ -147,7 +147,11 @@ class XGBoostModel:
 
     def predict(self, features: dict) -> dict:
         if not self.fitted or self.model_over25 is None:
-            return {"over_25_prob": 0.5, "home_win_prob": 0.33, "draw_prob": 0.33, "away_win_prob": 0.34}
+            return {
+                "over_25_prob":  0.5, "under_25_prob": 0.5,
+                "over_35_prob":  None, "under_35_prob": None, "btts_prob": None,
+                "home_win_prob": 0.33, "draw_prob": 0.33, "away_win_prob": 0.34,
+            }
 
         X = pd.DataFrame([features])
         for col in self.feature_columns:
@@ -162,8 +166,11 @@ class XGBoostModel:
             result["under_25_prob"] = round(1 - over25_prob, 4)
         except Exception as e:
             logger.error(f"XGBoost over_25 prediction failed: {e}")
-            result["over_25_prob"] = 0.5
+            result["over_25_prob"]  = 0.5
             result["under_25_prob"] = 0.5
+            result["over_35_prob"]  = None
+            result["under_35_prob"] = None
+            result["btts_prob"]     = None
 
         if self.model_outcome is not None:
             try:
@@ -176,6 +183,11 @@ class XGBoostModel:
                 result.update({"home_win_prob": 0.33, "draw_prob": 0.33, "away_win_prob": 0.34})
         else:
             result.update({"home_win_prob": 0.33, "draw_prob": 0.33, "away_win_prob": 0.34})
+
+        # Ensure all expected keys are present (None = model can't predict this market)
+        result.setdefault("over_35_prob",  None)
+        result.setdefault("under_35_prob", None)
+        result.setdefault("btts_prob",     None)
 
         return result
 

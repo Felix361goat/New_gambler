@@ -262,12 +262,17 @@ def _normalize_odds_for_predict(odds_df) -> list:
             if "draw" in outcome_lower:
                 internal_market = "1x2_draw"
             else:
-                home_words = set(home_lower.split())
-                away_words = set(away_lower.split())
-                out_words = set(outcome_lower.split())
-                home_match = len(home_words & out_words)
-                away_match = len(away_words & out_words)
-                internal_market = "1x2_home" if home_match >= away_match else "1x2_away"
+                # Substring containment: check if any significant word (>3 chars)
+                # from the team name appears in the outcome name.
+                home_match = any(w in outcome_lower for w in home_lower.split() if len(w) > 3)
+                away_match = any(w in outcome_lower for w in away_lower.split() if len(w) > 3)
+                if home_match and not away_match:
+                    internal_market = "1x2_home"
+                elif away_match and not home_match:
+                    internal_market = "1x2_away"
+                else:
+                    # Ambiguous (both or neither matched) — skip to avoid misclassifying
+                    continue
         elif raw_market == "totals":
             point = row.get("point")
             if point is not None:
@@ -465,7 +470,10 @@ def cmd_predict(config: dict):
                    ORDER BY r.settled_at DESC LIMIT 50"""
             ).fetchall()
         for _row in _clv_rows:
-            if (_row[0] or 0) < 0:
+            _clv_val = _row[0]
+            if _clv_val is None:
+                continue  # NULL CLV (no closing odds) — don't count, don't break streak
+            if _clv_val < 0:
                 consecutive_neg_clv += 1
             else:
                 break
@@ -625,13 +633,24 @@ def cmd_predict(config: dict):
                 if ev <= 0:
                     continue
 
-                stake = kelly_stake(our_prob_adj, platform_odds, bankroll, config)
+                # Pass Ampel-adjusted kelly_fraction so GELB/ROT stake reductions
+                # actually take effect — the base config always has 0.25.
+                ampel_config = {
+                    **config,
+                    "betting": {
+                        **config.get("betting", {}),
+                        "kelly_fraction":    ampel_params.kelly_fraction,
+                        "max_stake_percent": ampel_params.max_stake_percent,
+                    },
+                }
+                stake = kelly_stake(our_prob_adj, platform_odds, bankroll, ampel_config)
                 kelly_frac = (platform_odds - 1) * our_prob_adj - (1 - our_prob_adj)
                 kelly_frac = kelly_frac / (platform_odds - 1) if platform_odds > 1 else 0
 
                 bet_dict = {
                     "match_date": match_dict.get("date", str(date.today())),
                     "match_id": match_id,
+                    "sport": match_dict.get("sport", "soccer"),
                     "league": match_dict.get("league", ""),
                     "home_team": home,
                     "away_team": away,

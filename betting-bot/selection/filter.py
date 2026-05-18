@@ -214,8 +214,9 @@ def select_daily_bets(
             pred["match_fixing_flagged"] = False
 
     # Probability spread gate: wenn Modelle sich stark uneinig sind → höherer EV nötig
+    # Note: min_ev is already set (and possibly Ampel-adjusted) at the top of this
+    # function — do NOT re-read from config here or the Ampel override is lost.
     final_selected = []
-    min_ev = config.get("betting", {}).get("min_ev_threshold", 0.03)
     for bet in selected:
         model_preds = bet.get("_model_predictions", {})
         if model_preds and len(model_preds) >= 2:

@@ -41,6 +41,7 @@ class HockeySource(BaseSource):
     """Fetch and normalize hockey data from EliteProspects and SofaScore."""
 
     def __init__(self, config: Optional[dict] = None):
+        super().__init__()
         self.config = config or {}
         self.api_key = (
             (config or {})

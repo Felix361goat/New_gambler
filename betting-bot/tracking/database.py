@@ -40,7 +40,9 @@ CREATE TABLE IF NOT EXISTS bets (
     our_edge REAL,
     data_quality_tier INTEGER DEFAULT 3,        -- 1=Premium, 2=Standard, 3=PaperOnly
     data_quality_tier_label TEXT DEFAULT 'T3-PaperOnly',
-    live_eligible BOOLEAN DEFAULT 0            -- False für Tier 3
+    live_eligible BOOLEAN DEFAULT 0,           -- False für Tier 3
+    predict_window TEXT DEFAULT NULL,          -- 'morning'|'midday'|'afternoon'
+    brief_sent_at TIMESTAMP DEFAULT NULL       -- NULL = not yet briefed
 )
 """
 

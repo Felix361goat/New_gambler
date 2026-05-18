@@ -32,11 +32,27 @@ class PerformanceTracker:
             return 0
 
     def is_ready_for_live(self) -> bool:
-        min_bets = self.config.get("betting", {}).get("min_paper_bets_before_live", 200)
+        min_bets = self.config.get("betting", {}).get("min_paper_bets_before_live", 500)
+        min_days = self.config.get("betting", {}).get("min_paper_days_before_live", 60)
         min_roi = 3.0
         settled = self.get_settled_bet_count()
         roi = self.get_roi(days=3650)
-        return settled >= min_bets and roi > min_roi
+        # Both conditions must be met simultaneously — 500 bets AND 60 days.
+        # Unlocking via days-only at 60 days (~200 bets) would be statistically
+        # underpowered to distinguish skill from luck.
+        try:
+            with self.db._get_conn() as conn:
+                first_bet = conn.execute(
+                    "SELECT MIN(created_at) FROM bets"
+                ).fetchone()[0]
+            days_running = 0
+            if first_bet:
+                from datetime import datetime as _dt
+                start = _dt.fromisoformat(str(first_bet).split(".")[0])
+                days_running = ((_dt.utcnow() - start).days)
+        except Exception:
+            days_running = 0
+        return settled >= min_bets and days_running >= min_days and roi > min_roi
 
     def calculate_max_drawdown(self, days: int = 90) -> float:
         try:
@@ -67,7 +83,7 @@ class PerformanceTracker:
             return 0.0
         return round((abs_drawdown / self.starting_bankroll) * 100, 2)
 
-    def check_clv_gate(self, db, min_bets: int = 30) -> tuple[bool, Optional[float]]:
+    def check_clv_gate(self, db=None, min_bets: int = 30) -> tuple[bool, Optional[float]]:
         """
         Checks the rolling average CLV over the last `min_bets` settled bets.
 
@@ -77,8 +93,9 @@ class PerformanceTracker:
             (True, None)     if fewer than `min_bets` settled bets exist yet
                              (not enough data to make a judgment).
         """
+        _db = db if db is not None else self.db
         try:
-            with db._get_conn() as conn:
+            with _db._get_conn() as conn:
                 rows = conn.execute(
                     """SELECT r.clv_score
                        FROM results r
@@ -133,6 +150,7 @@ class PerformanceTracker:
         win_rate = (won / settled * 100) if settled > 0 else 0.0
         return {
             "bankroll": round(self.get_current_bankroll(), 2),
+            "starting_bankroll": round(self.starting_bankroll, 2),
             "total_pnl": round(summary.get("total_pnl") or 0.0, 2),
             "roi": round(summary.get("roi") or 0.0, 2),
             "settled_bets": settled,

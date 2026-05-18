@@ -70,7 +70,7 @@ class EnsembleModel:
             logger.warning(f"ELO prediction failed: {e}")
 
         if len(predictions) == 0:
-            logger.error(f"No models available for {home} vs {away}")
+            logger.error(f"No models available for {home_team} vs {away_team}")
             return None
         if len(predictions) < 2:
             # Poisson is intentionally disabled for tennis and basketball.
@@ -78,11 +78,11 @@ class EnsembleModel:
             # single-model ELO prediction rather than silently dropping all bets.
             if self.w_poisson > 0:
                 logger.error(
-                    f"Fewer than 2 models available for {home} vs {away} — skipping"
+                    f"Fewer than 2 models available for {home_team} vs {away_team} — skipping"
                 )
                 return None
             logger.info(
-                f"Single-model prediction for {home} vs {away} "
+                f"Single-model prediction for {home_team} vs {away_team} "
                 f"(Poisson disabled for sport={sport}, XGBoost not yet trained)"
             )
 
@@ -91,24 +91,31 @@ class EnsembleModel:
             logger.info(f"Models disagree for {home_team} vs {away_team} ({market}) — skipping")
             return None
 
-        # Weighted average
-        total_weight = sum(w for _, _, w in predictions)
+        # Weighted average — denominator is per-key so skipped models don't
+        # dilute the estimate (a model returning None for over_35_prob should
+        # not reduce the weight of the models that do predict it).
         result = {}
 
         keys = ["home_win_prob", "draw_prob", "away_win_prob", "over_25_prob", "under_25_prob",
                 "over_35_prob", "under_35_prob", "btts_prob"]
 
         for key in keys:
-            weighted_sum = sum(
-                pred.get(key, 0.0) * w
-                for _, pred, w in predictions
-                if pred.get(key) is not None
-            )
-            result[key] = round(weighted_sum / total_weight, 4)
+            contributing = [(pred, w) for _, pred, w in predictions if pred.get(key) is not None]
+            if not contributing:
+                result[key] = 0.0
+                continue
+            key_weight = sum(w for _, w in contributing)
+            result[key] = round(sum(pred.get(key, 0.0) * w for pred, w in contributing) / key_weight, 4)
 
-        # Feature completeness
+        # Guard: if all three 1x2 probabilities are zero the result is invalid
+        if result.get("home_win_prob", 0) + result.get("draw_prob", 0) + result.get("away_win_prob", 0) == 0:
+            logger.error(f"All 1x2 probs are zero for {home_team} vs {away_team} — dropping")
+            return None
+
+        # Feature completeness — skip internal metadata keys (lists/dicts)
+        public_features = {k: v for k, v in features.items() if not k.startswith("_")}
         expected_features = 30
-        actual_features = len([v for v in features.values() if v != 0])
+        actual_features = len([v for v in public_features.values() if v != 0])
         feature_completeness = min(1.0, actual_features / expected_features)
 
         # Model agreement score (0-1)

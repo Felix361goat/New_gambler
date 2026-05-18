@@ -60,7 +60,7 @@ def find_best_odds(match_id: str, market: str, odds_api_data: list) -> tuple[flo
             continue
         odds = entry.get("odds")
         bookmaker = entry.get("bookmaker", "unknown")
-        if odds and odds > best_odds:
+        if odds and odds > 1.0 and odds > best_odds:
             best_odds = odds
             best_bookmaker = bookmaker
 

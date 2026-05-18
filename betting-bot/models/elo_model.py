@@ -235,6 +235,14 @@ class EloModel:
             "home_win_prob": round(home_win_prob / total, 4),
             "draw_prob":     round(draw_prob / total, 4),
             "away_win_prob": round(away_win_prob / total, 4),
+            # ELO has no goal-scoring model — explicitly mark goal markets as
+            # None so the ensemble denominator excludes ELO for these keys
+            # rather than treating its absence as a 0.0 prediction.
+            "over_25_prob":  None,
+            "under_25_prob": None,
+            "over_35_prob":  None,
+            "under_35_prob": None,
+            "btts_prob":     None,
             "home_elo":      round(self.get_rating(home_team), 1),
             "away_elo":      round(self.get_rating(away_team), 1),
         }

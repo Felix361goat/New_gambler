@@ -40,6 +40,7 @@ class BasketballLowerSource(BaseSource):
     """Fetch and normalize lower-tier European basketball data."""
 
     def __init__(self, config: Optional[dict] = None):
+        super().__init__()
         self.config  = config or {}
         self.timeout = (config or {}).get("data_sources", {}).get("timeout_seconds", 10)
         self._sofascore_base = (
